@@ -815,21 +815,23 @@ extendPostScale(const SimTK::State& s, const ScaleSet& scaleSet)
  */
 void GeometryPath::computePath(const SimTK::State& s) const
 {
-    //const SimTK::Stage& sg = s.getSystemStage();
-    
     if (isCacheVariableValid(s, "current_path"))  {
         return;
     }
 
-    // Clear the current path.
-    Array<AbstractPathPoint*>& currentPath = 
+    Array<AbstractPathPoint*>& currentPath =
         updCacheVariableValue<Array<AbstractPathPoint*> >(s, "current_path");
+
+    // Clear the current path.
     currentPath.setSize(0);
 
     // Add the active fixed and moving via points to the path.
-    for (int i = 0; i < get_PathPointSet().getSize(); i++) {
-        if (get_PathPointSet()[i].isActive(s))
-            currentPath.append(&get_PathPointSet()[i]); // <--- !!!!BAD
+    const PathPointSet& points = get_PathPointSet();
+    for (int i = 0; i < points.getSize(); i++) {
+        AbstractPathPoint* p = &points[i];
+        if (p->isActive(s)) {
+            currentPath.append(p); // <--- !!!!BAD
+        }
     }
   
     // Use the current path so far to check for intersection with wrap objects, 
@@ -867,219 +869,231 @@ void GeometryPath::computeLengtheningSpeed(const SimTK::State& s) const
 void GeometryPath::
 applyWrapObjects(const SimTK::State& s, Array<AbstractPathPoint*>& path) const 
 {
-    if (get_PathWrapSet().getSize() < 1)
+    const PathWrapSet& pathWraps = get_PathWrapSet();
+    const int numPathWraps = pathWraps.getSize();
+
+    if (numPathWraps < 1) {
         return;
-
-    WrapResult best_wrap;
-    Array<int> result, order;
-
-    result.setSize(get_PathWrapSet().getSize());
-    order.setSize(get_PathWrapSet().getSize());
+    }
 
     // Set the initial order to be the order they are listed in the path.
-    for (int i = 0; i < get_PathWrapSet().getSize(); i++)
+    std::vector<int> order(numPathWraps);
+    for (int i = 0; i < numPathWraps; i++) {
         order[i] = i;
+    }
 
     // If there is only one wrap object, calculate the wrapping only once.
     // If there are two or more objects, perform up to 8 iterations where
     // the result from one wrap object is used as the starting point for
     // the next wrap.
-    const int maxIterations = get_PathWrapSet().getSize() < 2 ? 1 : 8;
-    double last_length = SimTK::Infinity;
-    for (int kk = 0; kk < maxIterations; kk++)
-    {
-        for (int i = 0; i < get_PathWrapSet().getSize(); i++)
-        {
-            result[i] = 0;
-            PathWrap& ws = get_PathWrapSet().get(order[i]);
-            const WrapObject* wo = ws.getWrapObject();
-            best_wrap.wrap_pts.setSize(0);
-            double min_length_change = SimTK::Infinity;
+    const int maxIterations = numPathWraps == 1 ? 1 : 8;
+    double computedLength = std::numeric_limits<double>::infinity();
+
+    for (int iteration = 0; iteration < maxIterations; iteration++) {
+        std::vector<WrapObject::WrapAction> result(numPathWraps);
+
+        for (int pathWrapIdx = 0; pathWrapIdx < numPathWraps; pathWrapIdx++) {
+            PathWrap& pathWrap = pathWraps.get(order[pathWrapIdx]);
+            const WrapObject& wrapObject = *pathWrap.getWrapObject();
 
             // First remove this object's wrapping points from the current path.
-            for (int j = 0; j <path.getSize(); j++) {
-                if( path.get(j) == &ws.getWrapPoint1()) {
+            for (int j = 0; j < path.getSize(); j++) {
+                const PathWrapPoint* pwp = &pathWrap.getWrapPoint1();
+                if (path.get(j) == pwp) {
                     path.remove(j); // remove the first wrap point
                     path.remove(j); // remove the second wrap point
                     break;
                 }
             }
 
-            if (wo->get_active()) {
-                // startPoint and endPoint in wrapStruct represent the 
-                // user-defined starting and ending points in the array of path 
-                // points that should be considered for wrapping. These indices 
-                // take into account via points, whether or not they are active. 
-                // Thus they are indices into mp_orig[], not mp[] (also, mp[] 
-                // may contain wrapping points from previous wrap objects, which
-                // would mess up the starting and ending indices). But the goal 
-                // is to find starting and ending indices in mp[] to consider
-                // for wrapping over this wrap object. Here is how that is done:
+            // skip computing this wrap if it is not active
+            if (!wrapObject.get_active()) {
+                continue;
+            }
 
-                // 1. startPoint and endPoint are 1-based, so subtract 1 from 
-                // them to get indices into get_PathPointSet(). -1 (or any value
-                // less than 1) means use the first (or last) point.
-                const int wrapStart = (ws.getStartPoint() < 1
-                                            ? 0 
-                                            : ws.getStartPoint() - 1);
-                const int wrapEnd   = (ws.getEndPoint() < 1
-                                            ? get_PathPointSet().getSize() - 1 
-                                            : ws.getEndPoint() - 1);
+            // Find the start + end (inclusive) range of points in the caller-provided `path` that:
+            // - start on an active point
+            // - end on an active point
+            // - account for via points
+            int firstActivePointIdx = -1;
+            int lastActivePointIdx = -1;
+            {
+                // 1. startPoint and endPoint are 1-based, where any number <1 is
+                //    equivalent to the first (0) or last (PathPointSet.size() - 1)
+                //    element.
+                const int wrapStart = pathWrap.getStartPoint() > 0 ?
+                                      pathWrap.getStartPoint() - 1 :
+                                      0;
+                const int wrapEnd = pathWrap.getEndPoint() > 0 ?
+                                    pathWrap.getEndPoint() - 1 :
+                                    get_PathPointSet().getSize() - 1;
 
-                // 2. Scan forward from wrapStart in get_PathPointSet() to find 
-                // the first point that is active. Store a pointer to it (smp).
-                int jfwd = wrapStart;
-                for (; jfwd <= wrapEnd; jfwd++)
-                    if (get_PathPointSet().get(jfwd).isActive(s))
+                // 2. find the first point that is active in PathPointSet
+                const AbstractPathPoint* firstActivePoint = nullptr;
+                for (int i = wrapStart; i <= wrapEnd; i++) {
+                    const AbstractPathPoint* p = &get_PathPointSet().get(i);
+                    if (p->isActive(s)) {
+                        firstActivePoint = p;
                         break;
-                if (jfwd > wrapEnd) // there are no active points in the path
-                    return;
-                const AbstractPathPoint* const smp = &get_PathPointSet().get(jfwd);
-
-                // 3. Scan backwards from wrapEnd in get_PathPointSet() to find 
-                // the last point that is active. Store a pointer to it (emp).
-                int jrev = wrapEnd;
-                for (; jrev >= wrapStart; jrev--)
-                    if (get_PathPointSet().get(jrev).isActive(s))
-                        break;
-                if (jrev < wrapStart) // there are no active points in the path
-                    return;
-                const AbstractPathPoint* const emp = &get_PathPointSet().get(jrev);
-
-                // 4. Now find the indices of smp and emp in _currentPath.
-                int start=-1, end=-1;
-                for (int j = 0; j < path.getSize(); j++) {
-                    if (path.get(j) == smp)
-                        start = j;
-                    if (path.get(j) == emp)
-                        end = j;
-                }
-                if (start == -1 || end == -1) // this should never happen
-                    return;
-
-                // You now have indices into _currentPath (which is a list of 
-                // all currently active points, including wrap points) that 
-                // represent the used-defined range of points to consider for 
-                // wrapping over this wrap object. Check each path segment in 
-                // this range, choosing the best wrap as the one that changes 
-                // the path segment length the least:
-                for (int pt1 = start; pt1 < end; pt1++)
-                {
-                    const int pt2 = pt1 + 1;
-
-                    // As long as the two points are not auto wrap points on the
-                    // same wrap object, check them for wrapping.
-                    if (   path.get(pt1)->getWrapObject() == NULL 
-                        || path.get(pt2)->getWrapObject() == NULL 
-                        || (   path.get(pt1)->getWrapObject() 
-                            != path.get(pt2)->getWrapObject()))
-                    {
-                        WrapResult wr;
-                        wr.startPoint = pt1;
-                        wr.endPoint   = pt2;
-
-                        result[i] = wo->wrapPathSegment(s, *path.get(pt1), 
-                                                        *path.get(pt2), ws, wr);
-                        if (result[i] == WrapObject::mandatoryWrap) {
-                            // "mandatoryWrap" means the path actually 
-                            // intersected the wrap object. In this case, you 
-                            // *must* choose this segment as the "best" one for
-                            // wrapping. If the path has more than one segment 
-                            // that intersects the object, the first one is
-                            // taken as the mandatory wrap (this is considered 
-                            // an ill-conditioned case).
-                            best_wrap = wr;
-                            // Store the best wrap in the pathWrap for possible 
-                            // use next time.
-                            ws.setPreviousWrap(wr);
-                            break;
-                        }  else if (result[i] == WrapObject::wrapped) {
-                            // "wrapped" means the path segment was wrapped over
-                            // the object, but you should consider the other 
-                            // segments as well to see if one
-                            // wraps with a smaller length change.
-                            double path_length_change = 
-                                calcPathLengthChange(s, *wo, wr, path);
-                            if (path_length_change < min_length_change)
-                            {
-                                best_wrap = wr;
-                                // Store the best wrap in the pathWrap for 
-                                // possible use next time
-                                ws.setPreviousWrap(wr);
-                                min_length_change = path_length_change;
-                            } else {
-                                // The wrap was not shorter than the current 
-                                // minimum, so just free the wrap points that 
-                                // were allocated.
-                                wr.wrap_pts.setSize(0);
-                            }
-                        } else {
-                            // Nothing to do.
-                        }
                     }
                 }
-
-                // Deallocate previous wrapping points if necessary.
-                ws.updWrapPoint2().getWrapPath().setSize(0);
-
-                if (best_wrap.wrap_pts.getSize() == 0) {
-                    ws.resetPreviousWrap();
-                    ws.updWrapPoint2().getWrapPath().setSize(0);
-                } else {
-                    // If wrapping did occur, copy wrap info into the PathStruct.
-                    ws.updWrapPoint1().getWrapPath().setSize(0);
-
-                    Array<SimTK::Vec3>& wrapPath = ws.updWrapPoint2().getWrapPath();
-                    wrapPath = best_wrap.wrap_pts;
-
-                    // In OpenSim, all conversion to/from the wrap object's 
-                    // reference frame will be performed inside 
-                    // wrapPathSegment(). Thus, all points in this function will
-                    // be in their respective body reference frames.
-                    // for (j = 0; j < wrapPath.getSize(); j++){
-                    //    convert_from_wrap_object_frame(wo, wrapPath.get(j));
-                    //    convert(ms->modelnum, wrapPath.get(j), wo->segment, 
-                    //            ms->ground_segment);
-                    // }
-
-                    ws.updWrapPoint1().setWrapLength(0.0);
-                    ws.updWrapPoint2().setWrapLength(best_wrap.wrap_path_length);
-
-                    ws.updWrapPoint1().setLocation(best_wrap.r1);
-                    ws.updWrapPoint2().setLocation(best_wrap.r2);
-
-                    // Now insert the two new wrapping points into mp[] array.
-                    path.insert(best_wrap.endPoint, &ws.updWrapPoint1());
-                    path.insert(best_wrap.endPoint + 1, &ws.updWrapPoint2());
+                if (firstActivePoint == nullptr) {
+                    return;  // there are no active points in PathPointSet
                 }
+
+                // 3. find the last point that is active in PathPointSet
+                const AbstractPathPoint* lastActivePoint = nullptr;
+                for (int i = wrapEnd; i >= wrapStart; i--) {
+                    const AbstractPathPoint* p = &get_PathPointSet().get(i);
+                    if (p->isActive(s)) {
+                        lastActivePoint = p;
+                        break;
+                    }
+                }
+                if (lastActivePoint == nullptr) {
+                    return; // there are no active points in PathPointSet
+                }
+
+                // 4. Now find the indices of the active points, taken from PathPointSet,
+                //    in the caller-provided `path` Array.
+                for (int i = 0; i < path.getSize(); i++) {
+                    const AbstractPathPoint* p = path.get(i);
+                    if (p == firstActivePoint) {
+                        firstActivePointIdx = i;
+                    }
+                    if (p == lastActivePoint) {
+                        lastActivePointIdx = i;
+                    }
+                }
+                if (firstActivePointIdx == -1 || lastActivePointIdx == -1) {
+                    return;  // this should never happen.
+                }
+            }
+
+            WrapResult bestWrap;
+            bestWrap.wrap_pts.setSize(0);
+
+            // Compute best wrapping for the PathWrap.
+            //
+            // Iterate over adjacent points (path segments) in the range and consider each path segment
+            // for wrapping over the wrap object.
+            //
+            // The "best" wrap is the one that changes the path segment length the least.
+            double smallestLengthChange = std::numeric_limits<double>::infinity();
+            for (int pt1 = firstActivePointIdx; pt1 < lastActivePointIdx; pt1++) {
+                AbstractPathPoint& p1 = *path.get(pt1);
+                AbstractPathPoint& p2 = *path.get(pt1 + 1);
+
+                // If the segments are auto-wrap points on same wrap object, skip
+                // checking them for wrapping.
+                if (p1.getWrapObject() != nullptr &&
+                    p2.getWrapObject() != nullptr &&
+                    p1.getWrapObject() != p2.getWrapObject()) {
+                    continue;
+                }
+
+                WrapResult wr;
+                wr.startPoint = pt1;
+                wr.endPoint   = pt1 + 1;
+
+                result[pathWrapIdx] = wrapObject.wrapPathSegment(s, p1, p2, pathWrap, wr);
+
+                // mandatoryWrap:
+                //
+                // The segment actually intersected the wrap object. In the mandatory case,
+                // the alg *must* choose this segment as the "best".
+                //
+                // note: this implementation means that only the first-intersecting segment
+                //       is taken as the mandatory wrap (considered an ill-conditioned case).
+                if (result[pathWrapIdx] == WrapObject::WrapAction::mandatoryWrap) {
+                    bestWrap = wr;
+                    pathWrap.setPreviousWrap(bestWrap);  // store best wrap for possible use next time
+
+                    break; // stop trying other segments
+                }
+
+                // wrapped:
+                //
+                // The segment wrapped over the object. Unlike the mandatory case, the alg should
+                // only choose this result if the length change is minimized by choosing it. Other
+                // segments should also be attempted.
+                if (result[pathWrapIdx] == WrapObject::WrapAction::wrapped) {
+                    double lengthChange = calcPathLengthChange(s, wrapObject, wr, path);
+                    if (lengthChange < smallestLengthChange) {
+                        smallestLengthChange = lengthChange;
+
+                        bestWrap = wr;
+                        pathWrap.setPreviousWrap(wr);  // store best wrap for possible use next time
+                    }
+                    continue;  // keep trying other segments
+                }
+            }
+
+            // Deallocate previous wrapping points if necessary.
+            pathWrap.updWrapPoint2().getWrapPath().setSize(0);
+
+            bool bestWrapFound = bestWrap.wrap_pts.getSize() > 0;
+            if (bestWrapFound) {
+                // If wrapping did occur, copy wrap info into the PathStruct.
+                PathWrapPoint& p1 = pathWrap.updWrapPoint1();
+                PathWrapPoint& p2 = pathWrap.updWrapPoint2();
+
+                p1.getWrapPath().setSize(0);
+                p2.getWrapPath() = bestWrap.wrap_pts;
+
+                // In OpenSim, all conversion to/from the wrap object's
+                // reference frame will be performed inside
+                // wrapPathSegment(). Thus, all points in this function will
+                // be in their respective body reference frames.
+                // for (j = 0; j < wrapPath.getSize(); j++){
+                //    convert_from_wrap_object_frame(wo, wrapPath.get(j));
+                //    convert(ms->modelnum, wrapPath.get(j), wo->segment,
+                //            ms->ground_segment);
+                // }
+
+                p1.setWrapLength(0.0);
+                p2.setWrapLength(bestWrap.wrap_path_length);
+
+                p1.setLocation(bestWrap.r1);
+                p2.setLocation(bestWrap.r2);
+
+                // Now insert the two new wrapping points into mp[] array.
+                path.insert(bestWrap.endPoint, &p1);
+                path.insert(bestWrap.endPoint + 1, &p2);
+            } else {
+                pathWrap.resetPreviousWrap();
+                pathWrap.updWrapPoint2().getWrapPath().setSize(0);
             }
         }
 
-        const double length = calcLengthAfterPathComputation(s, path); 
-        if (std::abs(length - last_length) < 0.0005) {
+        const double previousLength = computedLength;
+        computedLength = calcLengthAfterPathComputation(s, path);
+
+        if (std::abs(computedLength - previousLength) < 0.0005) {
+            // the path's length did not change above some tolerance limit,
+            // stop iterating (it's converged).
             break;
-        } else {
-            last_length = length;
         }
 
-        if (kk == 0 && get_PathWrapSet().getSize() > 1) {
-            // If the first wrap was a no wrap, and the second was a no wrap
-            // because a point was inside the object, switch the order of
-            // the first two objects and try again.
-            if (   result[0] == WrapObject::noWrap 
-                && result[1] == WrapObject::insideRadius)
-            {
-                order[0] = 1;
-                order[1] = 0;
+        // edge-case:
+        //
+        // if the first wrap did not wrap, but the second one did not wrap
+        // because a point was inside the object, switch the order of the first
+        // two objects for the next iteration.
+        if (iteration == 0 &&
+            numPathWraps > 1 &&
+            result[0] == WrapObject::WrapAction::noWrap &&
+            result[1] == WrapObject::WrapAction::insideRadius) {
 
-                // remove wrap object 0 from the list of path points
-                PathWrap& ws = get_PathWrapSet().get(0);
-                for (int j = 0; j < path.getSize(); j++) {
-                    if (path.get(j) == &ws.updWrapPoint1()) {
-                        path.remove(j); // remove the first wrap point
-                        path.remove(j); // remove the second wrap point
-                        break;
-                    }
+            std::swap(order[0], order[1]);
+
+            // remove wrap object 0 from the list of path points
+            for (int j = 0; j < path.getSize(); j++) {
+                const PathWrapPoint* pwp = &pathWraps.get(0).getWrapPoint1();
+                if (path.get(j) == pwp) {
+                    path.remove(j); // remove the first wrap point
+                    path.remove(j); // remove the second wrap point
+                    break;
                 }
             }
         }
@@ -1117,8 +1131,11 @@ double GeometryPath::
 calcLengthAfterPathComputation(const SimTK::State& s, 
                                const Array<AbstractPathPoint*>& currentPath) const
 {
-    double length = 0.0;
+    if (currentPath.getSize() < 2) {
+        return 0.0;
+    }
 
+    double length = 0.0;
     for (int i = 0; i < currentPath.getSize() - 1; i++) {
         const AbstractPathPoint* p1 = currentPath[i];
         const AbstractPathPoint* p2 = currentPath[i+1];
@@ -1126,20 +1143,21 @@ calcLengthAfterPathComputation(const SimTK::State& s,
         // If both points are wrap points on the same wrap object, then this
         // path segment wraps over the surface of a wrap object, so just add in 
         // the pre-calculated length.
-        if (   p1->getWrapObject() 
-            && p2->getWrapObject() 
-            && p1->getWrapObject() == p2->getWrapObject()) 
+        if (p1->getWrapObject() != nullptr &&
+            p2->getWrapObject() != nullptr &&
+            p1->getWrapObject() == p2->getWrapObject())
         {
             const PathWrapPoint* smwp = dynamic_cast<const PathWrapPoint*>(p2);
-            if (smwp)
+            if (smwp != nullptr) {
                 length += smwp->getWrapLength();
+            }
         } else {
             length += p1->calcDistanceBetween(s, *p2);
         }
     }
 
-    setLength(s,length);
-    return( length );
+    setLength(s, length);
+    return length;
 }
 
 //_____________________________________________________________________________

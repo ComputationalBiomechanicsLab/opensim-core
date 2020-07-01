@@ -172,7 +172,7 @@ string WrapCylinder::getDimensionsString() const
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                     const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
     const double& _radius = get_radius();
@@ -185,7 +185,8 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
         r1am, r1bm, r2am, r2bm, p11, p22, r1p, r2p, axispt, near12, 
         vert1, vert2, mpt, apex1, apex2, l1, l2, near00;
 
-    int i, return_code = wrapped;
+    int i;
+    WrapObject::WrapAction return_code = WrapAction::wrapped;
     bool r1_inter, r2_inter;
     bool constrained   = (bool) (_wrapSign != 0);
     bool far_side_wrap = false, long_wrap = false;
@@ -211,7 +212,7 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     if (WrapMath::CalcDistanceSquaredPointToLine(aPoint1, p0, dn) < r_squared ||
         WrapMath::CalcDistanceSquaredPointToLine(aPoint2, p0, dn) < r_squared)
     {
-        return insideRadius;
+        return WrapAction::insideRadius;
     }
 
     // Find the closest intersection between the muscle line segment and the line
@@ -233,11 +234,11 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     {
         if (WrapMath::CalcDistanceSquaredBetweenPoints(near12, near00) < r_squared && t12 > 0.0 && t12 < 1.0)
         {
-            return_code = mandatoryWrap;
+            return_code = WrapAction::mandatoryWrap;
         }
         else
         {
-            return noWrap;
+            return WrapAction::noWrap;
         }
     }
 
@@ -305,17 +306,17 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
             // to perform these checks.
             if (WrapMath::CalcDistanceSquaredBetweenPoints(near12, near00) < r_squared && t12 > 0.0 && t12 < 1.0)
             {
-                return_code = mandatoryWrap;
+                return_code = WrapAction::mandatoryWrap;
             }
             else
             {
                 if (DSIGN(aPoint1[_wrapAxis]) != DSIGN(aPoint2[_wrapAxis]) && DSIGN(near12[_wrapAxis]) != _wrapSign)
                 {
-                    return_code = wrapped;
+                    return_code = WrapAction::wrapped;
                 }
                 else
                 {
-                    return noWrap;
+                    return WrapAction::noWrap;
                 }
             }
         }
@@ -593,7 +594,7 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     double halfL = get_length() / 2.0;
     if ((aWrapResult.r1[2] < -halfL || aWrapResult.r1[2] > halfL) &&
         (aWrapResult.r2[2] < -halfL || aWrapResult.r2[2] > halfL) )
-        return noWrap;
+        return WrapAction::noWrap;
 
     // make the path and calculate the muscle length:
     _make_spiral_path(aPoint1, aPoint2, long_wrap, aWrapResult);

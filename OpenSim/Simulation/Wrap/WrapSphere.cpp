@@ -162,7 +162,7 @@ double WrapSphere::getRadius() const
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                  const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
    double l1, l2, disc, a, b, c, a1, a2, j1, j2, j3, j4, r1r2, ra[3][3], rrx[3][3], aa[3][3], mat[4][4], 
@@ -171,7 +171,8 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
             p1p2, np2, hp2, r1m, r2m, y, z, n, r1a, r2a,
             r1b, r2b, r1am, r2am, r1bm, r2bm;
             
-   int i, j,/* maxit, */ return_code = wrapped;
+   int i, j; /* maxit, */
+   WrapObject::WrapAction return_code = WrapAction::wrapped;
    bool far_side_wrap = false;
    static SimTK::Vec3 origin(0,0,0);
 
@@ -203,7 +204,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
 
    // check that neither point is inside the radius of the sphere
     if (Mtx::Magnitude(3, p1m) < get_radius() || Mtx::Magnitude(3, p2m) < get_radius())
-      return insideRadius;
+      return WrapAction::insideRadius;
 
     a = Mtx::DotProduct(3, ri, ri);
    b = -2.0 * Mtx::DotProduct(3, mp, ri);
@@ -215,7 +216,7 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
    {
       aFlag = false;
         aWrapResult.wrap_path_length = 0.0;
-      return noWrap;
+      return WrapAction::noWrap;
    }
 
    l1 = (-b + sqrt(disc)) / (2.0 * a);
@@ -226,14 +227,14 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
    {
       aFlag = false;
       aWrapResult.wrap_path_length = 0.0;
-      return noWrap;
+      return WrapAction::noWrap;
    }
 
    if (l1 < l2) 
    {
       aFlag = false;
       aWrapResult.wrap_path_length = 0.0;
-      return noWrap;
+      return WrapAction::noWrap;
    }
 
     Mtx::Normalize(3, p1p2, p1p2);
@@ -391,17 +392,17 @@ int WrapSphere::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec
 
          if (WrapMath::CalcDistanceSquaredBetweenPoints(origin, mm) < r_squared && tt > 0.0 && tt < 1.0)
          {
-            return_code = mandatoryWrap;
+            return_code = WrapAction::mandatoryWrap;
          }
          else
          {
             if (DSIGN(aPoint1[_wrapAxis]) != DSIGN(aPoint2[_wrapAxis]) && DSIGN(mm[_wrapAxis]) != _wrapSign)
             {
-               return_code = wrapped;
+               return_code = WrapAction::wrapped;
             }
             else
             {
-               return noWrap;
+               return WrapAction::noWrap;
             }
          }
       }

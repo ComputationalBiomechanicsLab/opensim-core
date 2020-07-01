@@ -137,7 +137,7 @@ string WrapSphereObst::getDimensionsString() const
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapSphereObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapSphereObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                         const PathWrap& aMuscleWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
     SimTK::Vec3& aPointP = aPoint1;     double R=0.8*get_radius();
@@ -153,7 +153,7 @@ int WrapSphereObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK:
     SimTK::Vec3 aZvec = aPointP % aPointS;
     if(aZvec.norm()<=1.e-7) {
         printf("WrapSphereObst: P and S are collinear with sphere center (no unique solution)\n");
-        return insideRadius;
+        return WrapAction::insideRadius;
     }                                           aZvec = aZvec.normalize();  // Z = P x S
     SimTK::Vec3 aYvec = aZvec % aXvec;          aYvec = aYvec.normalize();  // Y = Z x X
     
@@ -162,19 +162,25 @@ int WrapSphereObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK:
     double Sx=~aPointS*aXvec, Sy=~aPointS*aYvec, /*Sz=0.0,*/    dS=Sx*Sx+Sy*Sy,  rootS=dS-R*R;
 
     // Check P and S against sphere, and compute x and y components of wrap points Q and T
-    if( rootP<0.0 || rootS<0.0 ) return insideRadius;   // One of P or S lies within the sphere
+    if( rootP<0.0 || rootS<0.0 ) {
+        return WrapAction::insideRadius;   // One of P or S lies within the sphere
+    }
     dP=R/dP;    rootP=sqrt(rootP);  Qx=(R*Px-rootP*Py)*dP;  Qy=(R*Py+rootP*Px)*dP;
     dS=R/dS;    rootS=sqrt(rootS);  Tx=(R*Sx+rootS*Sy)*dS;  Ty=(R*Sy-rootS*Sx)*dS;
     // NOTE:  Qz and Tz are necessarily zero in the wrapping plane coordinate system since by definition they lie in the plane
 
     // Apply the 180-degree wrapping rule to see if contact is appropriate (i.e. wrap > 180 = no contact)
-    if( R*(Qx*Ty-Qy*Tx) < 0.0 ) return noWrap;
+    if( R*(Qx*Ty-Qy*Tx) < 0.0 ) {
+        return WrapAction::noWrap;
+    }
 
     // Compute respective wrapping segment lengths
     //double PQ = sqrt( (Qx-Px)*(Qx-Px) + (Qy-Py)*(Qy-Py) );
     //double TS = sqrt( (Tx-Sx)*(Tx-Sx) + (Ty-Sy)*(Ty-Sy) );
     double QT = R*acos( 1.0 - 0.5*( (Qx-Tx)*(Qx-Tx) + (Qy-Ty)*(Qy-Ty) )/(R*R) );
-    if(QT<0.0) QT=-QT;
+    if(QT<0.0) {
+        QT=-QT;
+    }
     
     // Transform Q and T from wrap coordinate system back into obstacle coordinate system
     SimTK::Vec3 aPointQ = (aXvec*Qx) + (aYvec*Qy);
@@ -188,7 +194,7 @@ int WrapSphereObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK:
     aWrapResult.r2=aPointT;     //SimmPoint wppt2(aWrapResult.r2);  
     aWrapResult.wrap_pts.append(aWrapResult.r2);
 
-    return wrapped;
+    return WrapAction::wrapped;
 }
 
 

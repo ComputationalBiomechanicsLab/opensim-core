@@ -186,7 +186,7 @@ SimTK::Vec3 WrapEllipsoid::getRadii() const
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                      const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
     int i, j, bestMu;
@@ -253,7 +253,7 @@ int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::
             aWrapResult.r2[i] /= aWrapResult.factor;
         }
 
-        return insideRadius;
+        return WrapAction::insideRadius;
     }
 
     MAKE_3DVECTOR21(p1, p2, p1p2);
@@ -277,7 +277,7 @@ int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::
             aWrapResult.r2[i] /= aWrapResult.factor;
         }
 
-        return noWrap;
+        return WrapAction::noWrap;
     }
 
     // check if the line through p1 and p2 intersects the ellipsoid
@@ -304,7 +304,7 @@ int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::
             aWrapResult.r2[i] /= aWrapResult.factor;
         }
 
-        return noWrap;
+        return WrapAction::noWrap;
     }
 
     l1 = (-bb + sqrt(disc)) / (2.0 * aa);
@@ -323,7 +323,7 @@ int WrapEllipsoid::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::
             aWrapResult.r2[i] /= aWrapResult.factor;
         }
 
-        return noWrap;
+        return WrapAction::noWrap;
     }
 
     // r1 & r2: intersection points of p1->p2 with the ellipsoid
@@ -592,7 +592,7 @@ calc_wrap_path:
         aWrapResult.r2[i] /= aWrapResult.factor;
     }
 
-    return mandatoryWrap;
+    return WrapAction::mandatoryWrap;
 }
 
 //_____________________________________________________________________________

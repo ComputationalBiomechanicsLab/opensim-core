@@ -77,7 +77,7 @@ public:
         positiveZ
     };
 
-    enum WrapAction
+    enum class WrapAction
     {
         noWrap,          // the path segment did not intersect the wrap object
         insideRadius,    // one or both path points are inside the wrap object
@@ -126,13 +126,13 @@ public:
 * @param aWrapResult The result of the wrapping (tangent points, etc.)
 * @return The status, as a WrapAction enum
 */
-    int wrapPathSegment( const SimTK::State& state, 
+    WrapAction wrapPathSegment( const SimTK::State& state,
                          AbstractPathPoint& aPoint1, AbstractPathPoint& aPoint2,
                          const PathWrap& aPathWrap,
                          WrapResult& aWrapResult) const;
 
 protected:
-    virtual int wrapLine(const SimTK::State& state,
+    virtual WrapObject::WrapAction wrapLine(const SimTK::State& state,
                          SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                          const PathWrap& aPathWrap,
                          WrapResult& aWrapResult, bool& aFlag) const = 0;

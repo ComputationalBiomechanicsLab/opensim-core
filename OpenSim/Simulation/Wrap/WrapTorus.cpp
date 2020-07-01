@@ -202,7 +202,7 @@ SimTK::Real WrapTorus::getOuterRadius() const
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapTorus::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapTorus::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                 const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
     int i;
@@ -212,7 +212,7 @@ int WrapTorus::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3
     aFlag = true;
 
     if (findClosestPoint(get_outer_radius(), &aPoint1[0], &aPoint2[0], &closestPt[0], &closestPt[1], &closestPt[2], _wrapSign, _wrapAxis) == 0)
-        return noWrap;
+        return WrapAction::noWrap;
 
     // Now put a cylinder at closestPt and call the cylinder wrap code.
     WrapCylinder cyl;//(rot, trans, quadrant, body, radius, length);
@@ -241,15 +241,15 @@ int WrapTorus::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3
     cylinderToTorus.setP(closestPtCyl);
     Vec3 p1 = cylinderToTorus.shiftFrameStationToBase(aPoint1);
     Vec3 p2 = cylinderToTorus.shiftFrameStationToBase(aPoint2);
-    int return_code = cyl.wrapLine(s, p1, p2, aPathWrap, aWrapResult, aFlag);
-   if (aFlag == true && return_code > 0) {
+    WrapAction return_code = cyl.wrapLine(s, p1, p2, aPathWrap, aWrapResult, aFlag);
+   if (aFlag == true && return_code != WrapAction::noWrap) {
         aWrapResult.r1 = cylinderToTorus.shiftBaseStationToFrame(aWrapResult.r1);
         aWrapResult.r2 = cylinderToTorus.shiftBaseStationToFrame(aWrapResult.r2);
         for (i = 0; i < aWrapResult.wrap_pts.getSize(); i++)
             aWrapResult.wrap_pts.updElt(i) = cylinderToTorus.shiftBaseStationToFrame(aWrapResult.wrap_pts.get(i));
     }
 
-    return wrapped;
+    return WrapAction::wrapped;
 }
 
 //_____________________________________________________________________________

@@ -398,7 +398,7 @@ static int double_cylinder(double U[3],double Ru,double V[3],double Rv,double M[
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapDoubleCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapDoubleCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                         const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
 
@@ -478,7 +478,7 @@ int WrapDoubleCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1
 //  SimmPoint wppt3(aWrapResult.sv);    aWrapResult.wrap_pts.append(wppt3);
     aWrapResult.wrap_pts.append(aWrapResult.r2);
 
-    return wrapped;
+    return WrapAction::wrapped;
 }
 
 

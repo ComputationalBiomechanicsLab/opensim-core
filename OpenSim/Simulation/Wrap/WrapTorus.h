@@ -75,7 +75,7 @@ public:
     void extendScale(const SimTK::State& s, const ScaleSet& scaleSet) override;
 
 protected:
-    int wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+    WrapObject::WrapAction wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
         const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const override;
 
     /// Implement generateDecorations to draw geometry in visualizer

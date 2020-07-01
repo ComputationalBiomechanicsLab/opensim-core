@@ -140,32 +140,31 @@ void WrapObject::extendFinalizeFromProperties()
     }
 }
 
-int WrapObject::wrapPathSegment(const SimTK::State& s, 
-                                AbstractPathPoint& aPoint1, AbstractPathPoint& aPoint2,
-                                const PathWrap& aPathWrap, 
-                                WrapResult& aWrapResult) const
+WrapObject::WrapAction WrapObject::wrapPathSegment(
+        const SimTK::State& s,
+        AbstractPathPoint& aPoint1,
+        AbstractPathPoint& aPoint2,
+        const PathWrap& aPathWrap,
+        WrapResult& aWrapResult) const
 {
-   int return_code = noWrap;
-    bool p_flag;
-    Vec3 pt1(0.0);
-    Vec3 pt2(0.0);
-
     // Convert the path points from the frames of the bodies they are attached
     // to, to the frame of the wrap object's body
-    pt1 = aPoint1.getParentFrame()
-        .findStationLocationInAnotherFrame(s, aPoint1.getLocation(s), getFrame());
+    Vec3 pt1 =
+            aPoint1.getParentFrame().findStationLocationInAnotherFrame(s, aPoint1.getLocation(s), getFrame());
     
-    pt2 = aPoint2.getParentFrame()
-        .findStationLocationInAnotherFrame(s, aPoint2.getLocation(s), getFrame());
+    Vec3 pt2 =
+            aPoint2.getParentFrame().findStationLocationInAnotherFrame(s, aPoint2.getLocation(s), getFrame());
 
     // Convert the path points from the frame of the wrap object's body
     // into the frame of the wrap object
     pt1 = _pose.shiftBaseStationToFrame(pt1);
     pt2 = _pose.shiftBaseStationToFrame(pt2);
 
-    return_code = wrapLine(s, pt1, pt2, aPathWrap, aWrapResult, p_flag);
+    // approx 46 % of CPU spent in wrapLine for Rajagopal model
+    bool p_flag = false;
+    WrapObject::WrapAction returnVal = wrapLine(s, pt1, pt2, aPathWrap, aWrapResult, p_flag);
 
-   if (p_flag == true && return_code > 0) {
+    if (p_flag == true && returnVal != WrapAction::noWrap) {
         // Convert the tangent points from the frame of the wrap object to the
         // frame of the wrap object's body
         aWrapResult.r1 = _pose.shiftFrameStationToBase(aWrapResult.r1);
@@ -173,11 +172,12 @@ int WrapObject::wrapPathSegment(const SimTK::State& s,
 
         // Convert the surface points (between the tangent points) from the frame of
         // the wrap object to the frame of the wrap object's body
-        for (int i = 0; i < aWrapResult.wrap_pts.getSize(); i++)
+        for (int i = 0; i < aWrapResult.wrap_pts.getSize(); i++) {
             aWrapResult.wrap_pts.updElt(i) = _pose.shiftFrameStationToBase(aWrapResult.wrap_pts.get(i));
+        }
    }
 
-   return return_code;
+   return returnVal;
 }
 
 void WrapObject::updateFromXMLNode(SimTK::Xml::Element& node,

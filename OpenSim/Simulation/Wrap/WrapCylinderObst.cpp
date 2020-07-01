@@ -195,7 +195,7 @@ int WrapCylinderObst::getWrapDirection() const {
  * @param aFlag A flag for indicating errors, etc.
  * @return The status, as a WrapAction enum
  */
-int WrapCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
+WrapObject::WrapAction WrapCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                         const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
     SimTK::Vec3& aPointP = aPoint1;     double R=0.8*( m_wrapDirection==righthand ? get_radius() : -get_radius() );
@@ -211,12 +211,12 @@ int WrapCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimT
     double Sx=aPointS[0], Sy=aPointS[1], Sz=aPointS[2], dS=Sx*Sx+Sy*Sy, rootS=dS-R*R;
 
     // Check P and S against cylinder, and compute x and y components of wrap points Q and T
-    if( rootP<0.0 || rootS<0.0 ) return insideRadius;   // One of P or S lies within the cylinder
+    if( rootP<0.0 || rootS<0.0 ) return WrapAction::insideRadius;   // One of P or S lies within the cylinder
     dP=R/dP;    rootP=sqrt(rootP);  Qx=(R*Px-rootP*Py)*dP;  Qy=(R*Py+rootP*Px)*dP;
     dS=R/dS;    rootS=sqrt(rootS);  Tx=(R*Sx+rootS*Sy)*dS;  Ty=(R*Sy-rootS*Sx)*dS;
 
     // Apply the 180-degree wrapping rule to see if contact is appropriate (i.e. wrap > 180 = no contact)
-    if( R*(Qx*Ty-Qy*Tx) < 0.0 ) return noWrap;
+    if( R*(Qx*Ty-Qy*Tx) < 0.0 ) return WrapAction::noWrap;
 
     // Compute respective wrapping segment lengths
     double PQ = sqrt( (Qx-Px)*(Qx-Px) + (Qy-Py)*(Qy-Py) );
@@ -247,7 +247,7 @@ int WrapCylinderObst::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimT
     }
     aWrapResult.wrap_pts.append(aWrapResult.r2);
 
-    return wrapped;
+    return WrapAction::wrapped;
 }
 
 
