@@ -1,13 +1,16 @@
 /* -------------------------------------------------------------------------- *
- *                         OpenSim:  testForward.cpp                          *
+ *                     OpenSim:  testFunctionBasedPathConversion.cpp          *
  * -------------------------------------------------------------------------- *
- * The OpenSim API is a toolkit for musculoskeletal modeling and simulation.  *
+ * ScapulothoracicJoint is offered as an addition to the OpenSim API          *
  * See http://opensim.stanford.edu and the NOTICE file for more information.  *
- * OpenSim is developed at Stanford University and supported by the US        *
- * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
- * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2017 Stanford University and the Authors                *
+ * OpenSim is developed at Stanford University and is supported by:           *
+ *                                                                            *
+ * - The National Institutes of Health (U54 GM072970, R24 HD065690)           *
+ * - DARPA, through the Warrior Web program                                   *
+ * - The Chan Zuckerberg Initiative (CZI 2020-218896)                         *
+ *                                                                            *
+ * Copyright (c) 2005-2021 Stanford University, TU Delft, and the Authors     *
  * Author(s): Joris Verhagen                                                  *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
@@ -20,119 +23,139 @@
  * See the License for the specific language governing permissions and        *
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
-// functionbasedpathconversion.cpp
-// author:  Joris Verhagen
 
-// INCLUDE
+#include <OpenSim/Common/Reporter.h>
+#include <OpenSim/Simulation/Model/Model.h>
+#include <OpenSim/Simulation/Manager/Manager.h>
+#include <OpenSim/Tools/FunctionBasedPathConversionTool.h>
+#include <SimTKcommon.h>
+
 #include <string>
 #include <iostream>
-#include <OpenSim/OpenSim.h>
+#include <memory>
+#include <chrono>
+#include <cstdio>
 
 using namespace OpenSim;
-using namespace std;
 
-void testArm();
+void testArmModelConversionAccuracy() {
+    std::string inputModelPath = "arm26.osim";
+    std::string outputModelName = "arm26_FBP";
 
+    // run the function-based path (FBP) conversion tool to create an FBP-based output
+    FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
+    tool.run();
 
-int main() {
-    SimTK_START_TEST("testFunctionBasedPathConversion");
-        // test arm model conversion accuracy
-        SimTK_SUBTEST(testArm);
-    SimTK_END_TEST();
+    // load both the input and output into memory
+    Model inputModel{inputModelPath};
+    Model outputModel{outputModelName + ".osim"};
+
+    // init the input model
+    inputModel.finalizeConnections();
+    inputModel.finalizeFromProperties();
+    inputModel.initSystem();
+
+    std::cout << "----- input model details -----\n";
+    inputModel.printSubcomponentInfo();
+
+    // init the output model
+    outputModel.finalizeConnections();
+    outputModel.finalizeFromProperties();
+    outputModel.initSystem();
+
+    std::cout << "----- output model details -----\n";
+    outputModel.printSubcomponentInfo();
+
+    // connect reporters to each model
+    std::string force = "/forceset/TRIlong";
+    std::string output = "length";
+
+    // connect reporter to input model
+    {
+        auto inputModelReporter = std::make_unique<ConsoleReporter>();
+        inputModelReporter->setName("point_results");
+        inputModelReporter->set_report_time_interval(0.05);
+        inputModelReporter->addToReport(inputModel.getComponent(force + "/pointbasedpath").getOutput(output));
+        inputModel.addComponent(inputModelReporter.release());
+    }
+
+    // connect reporter to output model
+    {
+        auto outputModelReporter = std::make_unique<ConsoleReporter>();
+        outputModelReporter ->setName("function_results");
+        outputModelReporter ->set_report_time_interval(0.05);
+        outputModelReporter ->addToReport(outputModel.getComponent(force + "/functionbasedpath").getOutput(output));
+        outputModel.addComponent(outputModelReporter.release());
+    }
+
+    // init physical system + states
+    SimTK::State& inputModelState = inputModel.initSystem();
+    SimTK::State& outputModelState = outputModel.initSystem();
+
+    // these are accumulated by each test run
+    struct TestStats {
+        std::chrono::high_resolution_clock::duration simTime{0};
+        int stepsAttempted = 0;
+        int stepsTaken = 0;
+        std::string name;
+
+        TestStats(std::string name_) : name{name_} {}
+    };
+
+    // function that runs a single test
+    auto runTest = [](OpenSim::Model& model, SimTK::State& state, TestStats& stats, double finalSimTime) {
+        OpenSim::Manager manager{model};
+        manager.initialize(state);
+
+        auto before = std::chrono::high_resolution_clock::now();
+        manager.integrate(finalSimTime);
+        auto after = std::chrono::high_resolution_clock::now();
+
+        stats.simTime += after - before;
+        stats.stepsAttempted += manager.getIntegrator().getNumStepsAttempted();
+        stats.stepsTaken += manager.getIntegrator().getNumStepsTaken();
+    };
+
+    // setup + run the tests
+    TestStats inputStats{"Input Model (point-based paths)"};
+    TestStats outputStats{"Output Model (function-based paths)"};
+    int numRepeats = 10;
+    double finalSimTime = 3.5;
+
+    // exercise input model
+    std::cerr << "----- running input model (point based path) tests -----\n";
+    for (int i = 0; i < numRepeats; ++i) {
+        runTest(inputModel, inputModelState, inputStats, finalSimTime);
+    }
+
+    // exercise output model
+    std::cerr << "----- running output model (function based path) tests -----\n";
+    for (int i = 0; i < numRepeats; ++i) {
+        runTest(outputModel, outputModelState, outputStats, finalSimTime);
+    }
+
+    // average out and print the stats
+    for (auto ts : {inputStats, outputStats}) {
+        ts.simTime /= numRepeats;
+        ts.stepsAttempted /= numRepeats;
+        ts.stepsTaken /= numRepeats;
+
+        long millis = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(ts.simTime).count());
+
+        printf("%s: \n    avg. time (ms) = %ld \n    integration steps attempted = %i \n    integration steps taken = %i)",
+               ts.name.c_str(),
+               millis,
+               ts.stepsAttempted,
+               ts.stepsTaken);
+    }
 }
 
-void testArm(){
+int main() {
     try {
-        string modelName = "arm26.osim";
-        string newModelName = "arm26_FBP.osim";
-
-        // test creating a FBP model
-        FunctionBasedPathConversionTool tool(modelName,newModelName);
-        tool.run();
-
-        // test loading in a FBP model
-        Model modelPoint(modelName);
-        Model modelFunction(newModelName);
-        // load/overwrite interp from file
-
-        modelPoint.finalizeConnections();
-        modelPoint.finalizeFromProperties();
-        modelPoint.initSystem();
-        modelPoint.printSubcomponentInfo();
-
-        modelFunction.finalizeConnections();
-        modelFunction.finalizeFromProperties();
-        modelFunction.initSystem();
-        modelFunction.printSubcomponentInfo();
-
-        // test simulating a FBP model
-        auto reporterPoint = new ConsoleReporter();
-        reporterPoint->setName("point_results");
-        reporterPoint->set_report_time_interval(0.05);
-        reporterPoint->addToReport(modelPoint.getComponent("/forceset/TRIlong/pointbasedpath").getOutput("length"));
-        modelPoint.addComponent(reporterPoint);
-
-        auto reporterFunction = new ConsoleReporter();
-        reporterFunction ->setName("function_results");
-        reporterFunction ->set_report_time_interval(0.05);
-        reporterFunction ->addToReport(modelFunction.getComponent("/forceset/TRIlong/functionbasedpath").getOutput("length"));
-        modelFunction.addComponent(reporterFunction);
-
-        SimTK::State& pointState = modelPoint.initSystem();
-        SimTK::State& functionState = modelFunction.initSystem();
-
-        chrono::milliseconds pbpSimTime{0};
-        chrono::milliseconds fbpSimTime{0};
-        int pbpStepsAttempted = 0;
-        int fbpStepsAttempted = 0;
-        int pbpStepsTaken = 0;
-        int fbpStepsTaken= 0;
-
-        int n = 10;
-        double tFinal = 3.5;
-        for (int i=0; i<n; i++){
-            OpenSim::Manager manager(modelPoint);
-            manager.initialize(pointState);
-            auto before = chrono::high_resolution_clock::now();
-            manager.integrate(tFinal);
-            auto after = chrono::high_resolution_clock::now();
-            auto dt = after - before;
-            pbpStepsAttempted += manager.getIntegrator().getNumStepsAttempted();
-            pbpStepsTaken += manager.getIntegrator().getNumStepsTaken();
-            pbpSimTime += chrono::duration_cast<chrono::milliseconds>(dt);
-        }
-
-        for (int i=0; i<n; i++){
-            OpenSim::Manager manager(modelFunction);
-            manager.initialize(functionState);
-            auto before = chrono::high_resolution_clock::now();
-            manager.integrate(tFinal);
-            auto after = chrono::high_resolution_clock::now();
-            auto dt = after - before;
-            fbpStepsAttempted += manager.getIntegrator().getNumStepsAttempted();
-            fbpStepsTaken += manager.getIntegrator().getNumStepsTaken();
-            fbpSimTime += chrono::duration_cast<chrono::milliseconds>(dt);
-        }
-        pbpSimTime /= n;
-        fbpSimTime /= n;
-        pbpStepsAttempted /= n;
-        fbpStepsAttempted /= n;
-        pbpStepsTaken /= n;
-        fbpStepsTaken /= n;
-
-        cout << "\navg-time PBP:        " << pbpSimTime.count() << endl;
-        cout << "avg-time FBP:        "   << fbpSimTime.count() << endl;
-
-        cout << "\nsteps attempted PBP: " << pbpStepsAttempted << endl;
-        cout << "steps attempted FBP: "   << fbpStepsAttempted << endl;
-
-        cout << "\nsteps taken PBP:     " << pbpStepsTaken << endl;
-        cout << "steps taken FBP:     "   << fbpStepsTaken << endl;
-
-        // test accuracy of FBP approximation
-
-    } catch (const Exception& e) {
-        e.print(cerr);
+        SimTK_START_TEST("testFunctionBasedPathConversion");
+            SimTK_SUBTEST(testArmModelConversionAccuracy);
+        SimTK_END_TEST();
+    } catch (const std::exception& ex) {
+        OpenSim::log_error(ex.what());
     }
-    cout << "Done" << endl;
 }

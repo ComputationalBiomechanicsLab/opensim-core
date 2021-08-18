@@ -1,5 +1,5 @@
 if(OPENSIM_BUILD_INDIVIDUAL_APPS)
-    OpenSimAddApplication(NAME functionbasedpathconversion)
+    OpenSimAddApplication(NAME FunctionBasedPathConversion)
 endif()
 
 if(BUILD_TESTING)
