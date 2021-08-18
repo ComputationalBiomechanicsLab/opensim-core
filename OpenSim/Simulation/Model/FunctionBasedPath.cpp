@@ -412,7 +412,7 @@ public:
         // evaluation with the weight
 
         // create an array containing the  lengths of each discretization direction
-        int discrLoopCnt[dimensions];
+        std::vector<int> discrLoopCnt(dimensions);
         for (int i = 0; i < dimensions; i++) {
             discrLoopCnt[i] = -1;
         }
