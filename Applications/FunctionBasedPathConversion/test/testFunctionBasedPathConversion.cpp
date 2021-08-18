@@ -72,7 +72,7 @@ void testArmModelConversionAccuracy() {
 
     // connect reporter to input model
     {
-        auto inputModelReporter = std::make_unique<ConsoleReporter>();
+        auto inputModelReporter = std::unique_ptr<ConsoleReporter>{new ConsoleReporter{}};
         inputModelReporter->setName("point_results");
         inputModelReporter->set_report_time_interval(0.05);
         inputModelReporter->addToReport(inputModel.getComponent(force + "/pointbasedpath").getOutput(output));
@@ -81,7 +81,7 @@ void testArmModelConversionAccuracy() {
 
     // connect reporter to output model
     {
-        auto outputModelReporter = std::make_unique<ConsoleReporter>();
+        auto outputModelReporter = std::unique_ptr<ConsoleReporter>{new ConsoleReporter{}};
         outputModelReporter ->setName("function_results");
         outputModelReporter ->set_report_time_interval(0.05);
         outputModelReporter ->addToReport(outputModel.getComponent(force + "/functionbasedpath").getOutput(output));
