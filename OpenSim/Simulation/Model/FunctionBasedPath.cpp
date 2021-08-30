@@ -5,6 +5,7 @@
 #include "PointForceDirection.h"
 #include <OpenSim/Simulation/Wrap/PathWrap.h>
 
+#include <OpenSim/Common/IO.h>
 #include <OpenSim/Simulation/Model/Model.h>
 #include <OpenSim/Simulation/Model/PointBasedPath.h>
 #include <OpenSim/Simulation/SimbodyEngine/Coordinate.h>
@@ -735,7 +736,7 @@ static Interpolate readInterp(const std::string &path) {
     };
 }
 
-static std::vector<const OpenSim::Coordinate*> readInterpCoords(const std::string &path, OpenSim::Component &root){
+static std::vector<const OpenSim::Coordinate*> readInterpCoords(const std::string& path, OpenSim::Component& root) {
     std::ifstream file{path};
 
     if (!file) {
@@ -791,7 +792,7 @@ static std::vector<const OpenSim::Coordinate*> readInterpCoords(const std::strin
     }
 
     std::vector<const OpenSim::Coordinate*> coords;
-    for (std::string coord : coordinates){
+    for (const std::string& coord : coordinates) {
         const OpenSim::Component& comp = root.getComponent(coord);
         if (comp.getAbsolutePathString() == coord){
             const OpenSim::Coordinate* c = dynamic_cast<const OpenSim::Coordinate*>(&comp);
@@ -827,11 +828,18 @@ void OpenSim::FunctionBasedPath::extendFinalizeFromProperties()
 {
     Super::extendFinalizeFromProperties();
 
+    // when finalizing from properties, try to load the backing file that contains
+    // interpolated data (the `data_path` property)
+
     bool hasBackingFile = !get_data_path().empty();
     bool hasInMemoryFittingData =  !_impl->interp.getdS().empty();
 
     if (hasBackingFile) {
-        // load the file, always
+        // change to the directory of the model file (the path in the osim is relative to
+        // the osim, not the process's working directory)
+        auto cwdchanger = IO::CwdChanger::changeToParentOf(getRoot().getDocumentFileName());
+
+        // read the interpolation data into a new interpolation structure
         _impl->interp = readInterp(get_data_path());
     } else if (hasInMemoryFittingData) {
         // do nothing: just use the already-loaded in-memory fitting data
@@ -844,20 +852,30 @@ void OpenSim::FunctionBasedPath::extendFinalizeFromProperties()
     }
 }
 
-void OpenSim::FunctionBasedPath::extendFinalizeConnections(OpenSim::Component &root)
+void OpenSim::FunctionBasedPath::extendFinalizeConnections(OpenSim::Component& root)
 {
-    Model* model = dynamic_cast<Model*>(&root);
     // Allow (model) component to include its own subcomponents
     // before calling the base method which automatically invokes
     // connect all the subcomponents.
-    if (model)
-        connectToModel(*model);
+    {
+        Model* model = dynamic_cast<Model*>(&root);
+        if (model) {
+            connectToModel(*model);
+        }
+    }
 
     bool hasBackingFile = !get_data_path().empty();
     bool hasInMemoryFittingData =  !_impl->interp.getdS().empty();
+
     if (hasBackingFile) {
-        // set the coordinates
-        _impl->interp.setCoords(readInterpCoords(get_data_path(),root));
+        // change to the directory of the model file
+        auto cwdchanger = IO::CwdChanger::changeToParentOf(getRoot().getDocumentFileName());
+
+        // read the interp coords (text) file
+        std::vector<const OpenSim::Coordinate*> coords = readInterpCoords(get_data_path(), root);
+
+        // update interpolator implementation with the (deserialized) coordinates
+        _impl->interp.setCoords(std::move(coords));
     } else if (hasInMemoryFittingData) {
         // do nothing: just use the already-loaded in-memory fitting data
         return;
