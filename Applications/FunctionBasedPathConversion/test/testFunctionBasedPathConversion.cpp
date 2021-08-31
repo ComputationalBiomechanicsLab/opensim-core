@@ -142,7 +142,7 @@ void testArmModelConversionAccuracy() {
 
         long millis = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(ts.simTime).count());
 
-        printf("%s: \n    avg. time (ms) = %ld \n    integration steps attempted = %i \n    integration steps taken = %i)",
+        printf("%s: \n    avg. time (ms) = %ld \n    integration steps attempted = %i \n    integration steps taken = %i)\n",
                ts.name.c_str(),
                millis,
                ts.stepsAttempted,

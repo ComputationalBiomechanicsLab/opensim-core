@@ -24,12 +24,14 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
+#include <OpenSim/Common/Array.h>
+#include <OpenSim/Simulation/Model/AbstractPathPoint.h>
 #include <OpenSim/Simulation/Model/GeometryPath.h>
+#include <OpenSim/Simulation/Model/FunctionBasedPathDiscretizationSet.h>
+#include <SimTKcommon/internal/ClonePtr.h>
+#include <SimTKcommon/internal/Vec.h>
 
-#include <iosfwd>
-#include <memory>
 #include <string>
-#include <utility>
 
 #ifdef SWIG
     #ifdef OSIMSIMULATION_API
@@ -40,9 +42,14 @@
 
 // forward declarations
 namespace OpenSim {
+class Component;
+class Coordinate;
 class Model;
 class PointBasedPath;
-class Coordinate;
+class PointForceDirection;
+class PhysicalFrame;
+class WrapObject;
+class WrapResult;
 }
 
 namespace SimTK {
@@ -50,7 +57,6 @@ class State;
 }
 
 namespace OpenSim {
-
 /**
  * An `OpenSim::GeometryPath` that computes its length/lengtheningSpeed by
  * interpolating a pre-computed Bezier curve.
@@ -67,10 +73,12 @@ namespace OpenSim {
  * because a curve's paramaterization depends on its place in the Model as
  * a whole.
  */
-class OSIMSIMULATION_API FunctionBasedPath : public GeometryPath {    
+class OSIMSIMULATION_API FunctionBasedPath : public GeometryPath {
     OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPath, GeometryPath);
 
-    OpenSim_DECLARE_PROPERTY(data_path, std::string, "Path to the associated data file for this path. Typically, the file contains interpolated data that the implementation uses to compute the path's length and lengthening speed at simulation-time");
+public:
+    OpenSim_DECLARE_UNNAMED_PROPERTY(FunctionBasedPathDiscretizationSet, "Discretizations that were used for each OpenSim::Coordinate that the path was fitted against");
+    OpenSim_DECLARE_LIST_PROPERTY(Evaluations, double, "The evaluated results of each *permutation* of discretizations. The FunctionBasedPathDiscretizationSet property describes how each OpenSim::Coordinate was discretized. These evaluations are the result of permuting through all possible combinations of discretizations. Effectively, this property contains a N-dimensional 'surface' of points, where each dimension of the surface is a Coordinate, and each dimension of each point is one of the evenly-spaced points in the discretization range [x_begin, x_range] for each dimension");
 
     struct Impl;
 private:
@@ -80,20 +88,8 @@ public:
     /**
      * Returns an in-memory representation of a FunctionBasedPath generated
      * by fitting curves against the supplied PointBasedPath.
-     *
-     * Does not set the 'data' member (it's an in-memory represenation). Saving
-     * the resulting FunctionBasedPath without setting 'data' will throw an
-     * exception.
      */
-    static FunctionBasedPath fromPointBasedPath(const Model& model,
-                                                const PointBasedPath& pbp);
-
-    /**
-     * Returns an FunctionBasedPath read from an associated data file
-     *
-     * The file must contain the content written by `printContent`
-     */
-    FunctionBasedPath fromDataFile(const std::string& path);
+    static FunctionBasedPath fromPointBasedPath(const Model& model, const PointBasedPath& pbp);
 
     FunctionBasedPath();
     FunctionBasedPath(const FunctionBasedPath&);
@@ -103,7 +99,7 @@ public:
     ~FunctionBasedPath() noexcept override;
 
     void extendFinalizeFromProperties() override;
-    void extendFinalizeConnections(Component &root) override;
+    void extendFinalizeConnections(Component& root) override;
 
     double getLength(const SimTK::State& s) const override;
     void setLength(const SimTK::State& s, double length) const override;
@@ -111,80 +107,72 @@ public:
     double getLengtheningSpeed(const SimTK::State& s) const override;
     void setLengtheningSpeed(const SimTK::State& s, double speed) const override;
 
-    const std::string& getDataPath() const { return get_data_path(); }
-    void setDataPath(const std::string& newPath) { upd_data_path() = newPath; }
+    double computeMomentArm(const SimTK::State& s, const Coordinate& aCoord) const override;
 
-    double computeMomentArm(const SimTK::State& s,
-                            const Coordinate& aCoord) const override;
-
-    void printContent(std::ostream& printFile) const;
-
-
-    // From GeometryPath refactoring
-public:
     void addInEquivalentForces(const SimTK::State& state,
                                const double& tension,
                                SimTK::Vector_<SimTK::SpatialVec>& bodyForces,
-                               SimTK::Vector& mobilityForces) const;
+                               SimTK::Vector& mobilityForces) const override;
 
-    void getPointForceDirections(const SimTK::State& s,
-            OpenSim::Array<PointForceDirection*> *rPFDs) const;
+    void generateDecorations(bool fixed,
+                             const ModelDisplayHints& hints,
+                             const SimTK::State& state,
+                             SimTK::Array_<SimTK::DecorativeGeometry>& appendToThis) const override;
 
 protected:
-    void computePath(const SimTK::State& s ) const;
-    void computeLengtheningSpeed(const SimTK::State& s) const;
+    void computePath(const SimTK::State& s ) const override;
+    void computeLengtheningSpeed(const SimTK::State& s) const override;
 
-    double calcLengthAfterPathComputation
-       (const SimTK::State& s, const Array<AbstractPathPoint*>& currentPath) const;
+    double calcLengthAfterPathComputation(const SimTK::State& s,
+                                          const Array<AbstractPathPoint*>& currentPath) const override;
 
-    void generateDecorations(
-                    bool                                        fixed,
-                    const ModelDisplayHints&                    hints,
-                    const SimTK::State&                         state,
-                    SimTK::Array_<SimTK::DecorativeGeometry>&   appendToThis) const
-                    override;
-
-
-
-
-
-    // related to pathpoints so has to be removed in release
-protected:
-    double calcPathLengthChange(const SimTK::State& s, const WrapObject& wo,
+    double calcPathLengthChange(const SimTK::State& s,
+                                const WrapObject& wo,
                                 const WrapResult& wr,
-                                const Array<AbstractPathPoint*>& path) const;
-
-public:
-    void addPathWrap(WrapObject& aWrapObject);
+                                const Array<AbstractPathPoint*>& path) const override;
 
 private:
-    const Array<AbstractPathPoint*>& getCurrentPath( const SimTK::State& s) const;
+    void getPointForceDirections(const SimTK::State& s,
+                                 OpenSim::Array<PointForceDirection*> *rPFDs) const override;
+
+    const Array<AbstractPathPoint*>& getCurrentPath(const SimTK::State& s) const override;
+
     AbstractPathPoint* addPathPoint(const SimTK::State& s,
                                     int index,
-                                    const PhysicalFrame& frame);
+                                    const PhysicalFrame& frame) override;
+
     AbstractPathPoint* appendNewPathPoint(const std::string& proposedName,
                                           const PhysicalFrame& frame,
-                                          const SimTK::Vec3& locationOnFrame);
-    bool canDeletePathPoint(int index);
-    bool deletePathPoint(const SimTK::State& s,
-                         int index);
+                                          const SimTK::Vec3& locationOnFrame) override;
+
+    bool canDeletePathPoint(int index) override;
+
+    bool deletePathPoint(const SimTK::State& s, int index) override;
+
     bool replacePathPoint(const SimTK::State& s,
                           AbstractPathPoint* oldPathPoint,
-                          AbstractPathPoint* newPathPoint);
+                          AbstractPathPoint* newPathPoint) override;
+
+
+    void addPathWrap(WrapObject& aWrapObject) override;
+
+    void deletePathWrap(const SimTK::State& s, int index) override;
 
     void moveUpPathWrap(const SimTK::State& s,
-                        int index);
+                        int index) override;
+
     void moveDownPathWrap(const SimTK::State& s,
-                          int index);
-    void deletePathWrap(const SimTK::State& s,
-                        int index);
+                          int index) override;
 
     void applyWrapObjects(const SimTK::State& s,
-                          Array<AbstractPathPoint*>& path) const;
+                          Array<AbstractPathPoint*>& path) const override;
 
-    void namePathPoints(int aStartingIndex);
-    void placeNewPathPoint(const SimTK::State& s, SimTK::Vec3& aOffset,
-                           int index, const PhysicalFrame& frame);
+    void namePathPoints(int aStartingIndex) override;
+
+    void placeNewPathPoint(const SimTK::State& s,
+                           SimTK::Vec3& aOffset,
+                           int index,
+                           const PhysicalFrame& frame) override;
 };
 }
 
