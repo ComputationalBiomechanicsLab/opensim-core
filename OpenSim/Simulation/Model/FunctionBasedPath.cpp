@@ -174,7 +174,7 @@ static std::vector<double> computeEvaluationsFromPBP(OpenSim::PointBasedPath con
         while (pos > 0 && discStepIdx[pos] >= discs[pos].nsteps) {
             discStepIdx[pos] = 0;  // overflow
             ++discStepIdx[pos-1];  // carry
-            --pos;  // propagate
+            --pos;
         }
     }
 
@@ -188,7 +188,7 @@ static std::vector<double> computeEvaluationsFromPBP(OpenSim::PointBasedPath con
 }
 
 struct OpenSim::FunctionBasedPath::Impl final {
-    // direct pointers to the coordinates that were discretized
+    // direct pointers to each coordinate
     std::vector<OpenSim::Coordinate const*> coords;
 
     // absolute paths of each coordinate (1:1 with coords)
@@ -299,10 +299,17 @@ static void Impl_SetCoordinatePointersFromCoordinatePaths(OpenSim::FunctionBased
 // returns interpolated path length for a given permutation of coordinate
 // values
 //
+// this is the "heart" of the FPB algorithm. It's loosely based on the algorithm
+// described here:
+//
+//     "Two hierarchies of spline interpolations. Practical algorithms for multivariate higher order splines"
+//     https://arxiv.org/abs/0905.3564
+//
 // `inputVals` points to a sequence of `nCoords` values that were probably
 // retrieved via `Coordinate::getValue(SimTK::State const&)`. The reason
-// they're provided externally is because derivative calculation can fiddle
-// the values a little bit
+// that `inputVals` is provided externally (rather than have this implementation
+// handle calling `getValue`) is because derivative calculations need to fiddle
+// the input values slightly
 static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
                                  double const* inputVals,
                                  int nCoords) {
@@ -313,6 +320,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     // compute:
     //
     // - the index of the first discretization step *before* the input value
+    //
     // - the polynomial of the curve at that step, given its fractional distance
     //   toward the next step
     using Polynomial = std::array<double, 4>;
@@ -394,12 +402,12 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     while (dimIdxOffsets[0] < 3) {
 
         // compute `beta` (weighted coefficient per coord) for this particular
-        // permutation coordinate locations (e.g. -1, 0, 0, 2) and figure out
+        // permutation's coordinate locations (e.g. -1, 0, 0, 2) and figure out
         // what the closest input value was at the weighted location. Add the
         // result the the output
 
         double beta = 1.0;
-        int evalStride = 1;  // space between evaluations: gets bigger at lower idx coords
+        int evalStride = 1;
         int evalIdx = 0;
 
         // go backwards, from least-significant coordinate (highest idx)
@@ -415,14 +423,16 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
             evalStride *= impl.discretizations[coord].nsteps;
         }
 
-        z += beta * impl.evals[evalIdx];
+        // equivalent to z += b*v, but handles rounding errors when the rhs
+        // is very small
+        z = std::fma(beta, impl.evals[evalIdx], z);
 
         // increment the offsets
         //
         // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
         {
             int pos = nCoords-1;
-            ++dimIdxOffsets[pos];  // perform first (potentially overflowing) increment
+            ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
             while (pos > 0 && dimIdxOffsets[pos] >= 2) {  // handle overflows + carry propagation
                 dimIdxOffsets[pos] = 0;  // overflow
                 ++dimIdxOffsets[pos-1];  // carry propagation
@@ -470,15 +480,15 @@ static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl cons
     // compute value at current point
     double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
 
-    // alter the input value for the to-be-derived coordinate *slightly*
-    inputVals[coordIdx] += 0.0001;
+    static constexpr double h = 0.0001;
 
-    // compute value at the altered point
+    // alter the input value for the to-be-derived coordinate *slightly* and recompute
+    inputVals[coordIdx] += h;
     double v2 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
 
     // the derivative is how much the output changed when the input was altered
     // slightly (this is a poor-man's discrete derivative method)
-    return (v2 - v1) / 0.0001;
+    return (v2 - v1) / h;
 }
 
 // get the *derivative* of the path length with respect to the given Coordinate
@@ -507,20 +517,23 @@ static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl cons
         OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
     }
 
-    // use the "raw" (non-lookup) version of this function
+    // use the "raw" (non-lookup) version of this function with the index
     return Impl_GetPathLengthDerivative(impl, s, coordIdx);
 }
 
 // get the lengthening speed of the path in the current state
 static double Impl_GetLengtheningSpeed(const OpenSim::FunctionBasedPath::Impl& impl,
                                        const SimTK::State& state) {
-    double rv = 0.0;
-    for (int coord = 0; coord < static_cast<int>(impl.coords.size()); ++coord) {
-        double deriv = Impl_GetPathLengthDerivative(impl, state, coord);
-        double speed = impl.coords[coord]->getSpeedValue(state);
-        rv += deriv * speed;
+
+    double lengtheningSpeed = 0.0;
+    for (int coordIdx = 0; coordIdx < static_cast<int>(impl.coords.size()); ++coordIdx) {
+        double deriv = Impl_GetPathLengthDerivative(impl, state, coordIdx);
+        double coordSpeedVal = impl.coords[coordIdx]->getSpeedValue(state);
+
+        lengtheningSpeed = std::fma(deriv, coordSpeedVal, lengtheningSpeed);
     }
-    return rv;
+
+    return lengtheningSpeed;
 }
 
 //----------------------------------------------------------------------------
@@ -540,10 +553,10 @@ OpenSim::FunctionBasedPath OpenSim::FunctionBasedPath::fromPointBasedPath(
 
     OpenSim::FunctionBasedPath::Impl& impl = *fbp._impl;
 
-    // compute underlying impl data from the model + PBP
+    // compute underlying impl data from the PBP
     Impl_ComputeFromPBP(impl, model, pbp);
 
-    // write impl discretizations into the property (for later serialization)
+    // write impl discretizations into the `Discretizations` property
     OpenSim::FunctionBasedPathDiscretizationSet& set = fbp.updProperty_FunctionBasedPathDiscretizationSet().updValue();
     for (size_t i = 0; i < impl.coords.size(); ++i) {
         auto disc = std::unique_ptr<OpenSim::FunctionBasedPathDiscretization>{new FunctionBasedPathDiscretization{}};
@@ -554,9 +567,10 @@ OpenSim::FunctionBasedPath OpenSim::FunctionBasedPath::fromPointBasedPath(
         set.adoptAndAppend(disc.release());
     }
 
-    // write evals into FBP property
+    // write evals into `Evaluations` property
+    auto& evalsProp = fbp.updProperty_Evaluations();
     for (double eval : fbp._impl->evals) {
-        fbp.updProperty_Evaluations().appendValue(eval);
+        evalsProp.appendValue(eval);
     }
 
     return fbp;
