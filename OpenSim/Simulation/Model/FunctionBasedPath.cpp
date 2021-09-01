@@ -11,9 +11,9 @@
 
 static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 16;  // important: upper limit that's used for stack allocations
 static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxCoordsThatCanBeInterpolated);
-static constexpr int g_NumProbingDiscretizationsDefault = 3;
+static constexpr int g_NumProbingDiscretizationsDefault = 8;
 static constexpr double g_MinProbingMomentArmChangeDefault = 0.001;
-static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 80;
+static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 64;
 
 // returns `true` if changing the supplied `Coordinate` changes the moment arm
 // of the supplied `PointBasedPath` (PBP)
@@ -145,7 +145,6 @@ static std::vector<double> computeEvaluationsFromPBP(OpenSim::PointBasedPath con
     // holds which "step" in each Coordinate's [begin, end] discretization we
     // have evaluated up to
     std::array<int, g_MaxCoordsThatCanBeInterpolated> discStepIdx{};
-
     while (discStepIdx[0] < discs[0].nsteps) {
 
         // set all coordinate values for this step
@@ -333,16 +332,16 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     // - the polynomial of the curve at that step, given its fractional distance
     //   toward the next step
     using Polynomial = std::array<double, 4>;
-    std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps{};
-    std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas{};
+    std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
+    std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
     for (int coord = 0; coord < nCoords; ++coord) {
         double inputVal = inputVals[coord];
         Discretization const& disc = impl.discretizations[coord];
 
         // compute index of first discretization step *before* the input value and
         // the fraction that the input value is towards the *next* discretization step
-        int idx = -1337;
-        double frac = -1337.0;
+        int idx;
+        double frac;
         if (inputVal < disc.begin) {
             idx = 1;
             frac = 0.0;
@@ -361,11 +360,17 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
         }
 
         // compute polynomial based on fraction the point is toward the next point
+        double frac2 = frac*frac;
+        double frac3 = frac2*frac;
+        double frac4 = frac3*frac;
+        double fracMinusOne = frac - 1;
+        double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
+
         Polynomial p;
-        p[0] = (0.5*pow(frac - 1,3)*frac*(2*frac + 1));
-        p[1] = (-0.5*(frac - 1)*(6*pow(frac,4) - 9*pow(frac,3) + 2*frac + 2));
-        p[2] = (0.5*frac*(6*pow(frac,4) - 15*pow(frac,3) + 9*pow(frac,2) + frac + 1));
-        p[3] = (-0.5*(frac - 1)*pow(frac,3)*(2*frac - 3));
+        p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
+        p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
+        p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
+        p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
 
         closestDiscretizationSteps[coord] = idx;
         betas[coord] = p;
@@ -387,7 +392,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     // of integer offsets that can be -1, 0, 1, or 2
     //
     // the algorithm increments this array as it goes through each permutation
-    std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets{};
+    std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
     for (int coord = 0; coord < nCoords; ++coord) {
         dimIdxOffsets[coord] = -1;
     }
@@ -455,7 +460,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
 
     // sanity check: is `z` accumulated from the expected number of iterations?
     {
-        int expectedIterations = pow(4, nCoords);
+        int expectedIterations = 1 << (2*nCoords);
         if (cnt != expectedIterations) {
             std::stringstream msg;
             msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
