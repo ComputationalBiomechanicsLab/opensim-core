@@ -44,58 +44,27 @@ namespace OpenSim {
  * @version 1.0
  */
 class OSIMTOOLS_API FunctionBasedPathConversionTool: public AbstractTool {
-OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathConversionTool, AbstractTool);
 
-//=============================================================================
-// MEMBER VARIABLES
-//=============================================================================
-protected:
+    OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathConversionTool, AbstractTool);
+
+private:
     std::string _modelPath;
     std::string _newModelName;
+    bool _verbose;
 
-//=============================================================================
-// METHODS
-//=============================================================================
-    //--------------------------------------------------------------------------
-    // CONSTRUCTION
-    //--------------------------------------------------------------------------
 public:
-    virtual ~FunctionBasedPathConversionTool();
     FunctionBasedPathConversionTool();
-    FunctionBasedPathConversionTool(const std::string modelPath, const std::string newModelName);
+    FunctionBasedPathConversionTool(const std::string& modelPath, const std::string& newModelName);
 
-//    void generateModelAndPrint();
+    const std::string& getModelPath() const;
+    void setModelPath(const std::string&);
 
-    //--------------------------------------------------------------------------
-    // OPERATORS
-    //--------------------------------------------------------------------------
-public:
-//#ifndef SWIG
-//    FunctionBasedPathConversionTool&
-//        operator=(const FunctionBasedPathConversionTool &aFunctionBasedPathConversionTool);
-//#endif
-//    void updateFromXMLNode(SimTK::Xml::Element& aNode, int versionNumber=-1) override;
+    const std::string& getNewModelName() const;
+    void setNewModelName(const std::string&);
 
-    //--------------------------------------------------------------------------
-    // GET AND SET
-    //--------------------------------------------------------------------------
-    void setModelPath(const std::string modelPath) {_modelPath = modelPath;}
-    void setNewModelName(const std::string newModelName) {_newModelName = newModelName;}
-    std::string getModelPath() {return _modelPath;}
-    std::string getNewModelName() {return _newModelName;}
-
-    //--------------------------------------------------------------------------
-    // INTERFACE
-    //--------------------------------------------------------------------------
     bool run() override SWIG_DECLARE_EXCEPTION;
-
-//=============================================================================
-};  // END of class FunctionBasedPathConversionTool
-
-}; //namespace
-//=============================================================================
-//=============================================================================
-
+};
+}
 #endif // _FunctionBasedPathConversionTool_h__
 
 

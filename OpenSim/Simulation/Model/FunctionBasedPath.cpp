@@ -9,27 +9,20 @@
 #include <memory>
 #include <vector>
 
-// upper limit on the number of coordinates that can be reasonably interpolated
-// the implementation
-//
-// interpolation can suffer from a combinatorial explosion. Even if you only discretize
-// two points per coordinate, 16 input coordinates can produce 2^16 discretizations
-static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 16;
-
-// number of "probing" steps to take when trying to figure out whether a given coordinate
-// affects a point-based path
-static constexpr int g_NumCoordProbingSteps = 3;
-
-// the minimum amount a moment arm must change when probing for the probing step to return
-// `true` (i.e. "this coordinate does affect the path")
-static constexpr double g_MinMomentArmChangeRequiredForPositiveProbe = 0.001;
+static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 16;  // important: upper limit that's used for stack allocations
+static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxCoordsThatCanBeInterpolated);
+static constexpr int g_NumProbingDiscretizationsDefault = 3;
+static constexpr double g_MinProbingMomentArmChangeDefault = 0.001;
+static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 80;
 
 // returns `true` if changing the supplied `Coordinate` changes the moment arm
 // of the supplied `PointBasedPath` (PBP)
 static bool coordAffectsPBP(
     OpenSim::PointBasedPath const& pbp,
     OpenSim::Coordinate const& c,
-    SimTK::State& state) {
+    SimTK::State& state,
+    int numProbingSteps,
+    double minMomentArmChangeRequired) {
 
     bool initialLockedState = c.getLocked(state);
     double initialValue = c.getValue(state);
@@ -38,14 +31,14 @@ static bool coordAffectsPBP(
 
     double start = c.getRangeMin();
     double end = c.getRangeMax();
-    double step = (end - start) / g_NumCoordProbingSteps;
+    double step = (end - start) / numProbingSteps;
 
     bool affectsCoord = false;
     for (double v = start; v <= end; v += step) {
         c.setValue(state, v);
         double ma = pbp.computeMomentArm(state, c);
 
-        if (std::abs(ma) >= g_MinMomentArmChangeRequiredForPositiveProbe) {
+        if (std::abs(ma) >= minMomentArmChangeRequired) {
             affectsCoord = true;
             break;
         }
@@ -65,14 +58,16 @@ static bool coordAffectsPBP(
 // do)
 static std::vector<OpenSim::Coordinate const*> coordsThatAffectPBP(OpenSim::Model const& model,
                                                                    OpenSim::PointBasedPath const& pbp,
-                                                                   SimTK::State& st) {
+                                                                   SimTK::State& st,
+                                                                   int numProbingSteps,
+                                                                   double minMomentArmChangeRequired) {
     std::vector<const OpenSim::Coordinate*> rv;
     for (OpenSim::Coordinate const& c : model.getComponentList<OpenSim::Coordinate>()){
         if (c.getMotionType() == OpenSim::Coordinate::MotionType::Coupled) {
             continue;
         }
 
-        if (!coordAffectsPBP(pbp, c, st)) {
+        if (!coordAffectsPBP(pbp, c, st, numProbingSteps, minMomentArmChangeRequired)) {
             continue;
         }
 
@@ -91,15 +86,17 @@ struct Discretization final {
 };
 
 // compute ideal discretization of the given coordinate
-static Discretization discretizationForCoord(OpenSim::Coordinate const&) {
+static Discretization discretizationForCoord(OpenSim::Coordinate const&, int numDiscretizationSteps) {
     // TODO: these hacky ranges were imported from the original code. Joris had this
     // commented out:
     //     dc.begin = std::max(c.getRangeMin(), -static_cast<double>(SimTK_PI));
     //     dc.end = std::min(c.getRangeMax(), static_cast<double>(SimTK_PI));
+    SimTK_ASSERT_ALWAYS(numDiscretizationSteps >= 4, "need to supply more than 4 discretization steps");
+
     Discretization d;
     d.begin = -static_cast<double>(SimTK_PI)/2;
     d.end = static_cast<double>(SimTK_PI)/2;
-    d.nsteps = 80;
+    d.nsteps = numDiscretizationSteps - 3;
     double step = (d.end-d.begin) / (d.nsteps-1);
 
     // expand range slightly in either direction to ensure interpolation is
@@ -152,11 +149,14 @@ static std::vector<double> computeEvaluationsFromPBP(OpenSim::PointBasedPath con
     while (discStepIdx[0] < discs[0].nsteps) {
 
         // set all coordinate values for this step
-        for (size_t i = 0; i < ncoords; ++i) {
-            Discretization const& discr = discs[i];
-            double step = (discr.end - discr.begin) / discr.nsteps;
-            double val =  discr.begin + step*discr.end;
-            coords[i]->setValue(state, val);
+        for (size_t coord = 0; coord < ncoords; ++coord) {
+            Discretization const& discr = discs[coord];
+
+            double stepSz = (discr.end - discr.begin) / discr.nsteps;
+            int step = discStepIdx[coord];
+            double val =  discr.begin + step*stepSz;
+
+            coords[coord]->setValue(state, val);
         }
 
         // eval the length of the PBP for this permutation of coordinate values
@@ -209,9 +209,12 @@ struct OpenSim::FunctionBasedPath::Impl final {
 
 // compute fresh implementation data from an existing PointBasedPath by
 // evaluating it and fitting it to a function-based curve
-static void Impl_ComputeFromPBP(OpenSim::FunctionBasedPath::Impl& impl,
+//
+// returns false if too many/too little coordinates affect the path
+static bool Impl_ComputeFromPBP(OpenSim::FunctionBasedPath::Impl& impl,
                                 const OpenSim::Model& model,
-                                const OpenSim::PointBasedPath& pbp) {
+                                const OpenSim::PointBasedPath& pbp,
+                                const OpenSim::FunctionBasedPath::FittingParams& params) {
 
     // copy model, so we can independently equilibrate + realize + modify the
     // copy without having to touch the source model
@@ -221,7 +224,11 @@ static void Impl_ComputeFromPBP(OpenSim::FunctionBasedPath::Impl& impl,
     modelClone->realizeVelocity(initialState);
 
     // set `coords`
-    impl.coords = coordsThatAffectPBP(*modelClone, pbp, initialState);
+    impl.coords = coordsThatAffectPBP(*modelClone, pbp, initialState, params.numProbingDiscretizations, params.minProbingMomentArmChange);
+    if (static_cast<int>(impl.coords.size()) > params.maxCoordsThatCanAffectPath || impl.coords.size() == 0) {
+        impl.coords.clear();
+        return false;
+    }
 
     // set `coordAbsPaths`
     impl.coordAbsPaths.clear();
@@ -234,12 +241,14 @@ static void Impl_ComputeFromPBP(OpenSim::FunctionBasedPath::Impl& impl,
     impl.discretizations.clear();
     impl.discretizations.reserve(impl.coords.size());
     for (const OpenSim::Coordinate* c : impl.coords) {
-        impl.discretizations.push_back(discretizationForCoord(*c));
+        impl.discretizations.push_back(discretizationForCoord(*c, params.numDiscretizationStepsPerDimension));
     }
 
     // set `evals`
     SimTK_ASSERT_ALWAYS(impl.coords.size() == impl.discretizations.size(), "these should be equal by now");
     impl.evals = computeEvaluationsFromPBP(pbp, initialState, impl.coords.data(), impl.discretizations.data(), impl.coords.size());
+
+    return true;
 }
 
 // init underlying implementation data from a `FunctionBasedPath`s (precomputed) properties
@@ -332,13 +341,13 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
 
         // compute index of first discretization step *before* the input value and
         // the fraction that the input value is towards the *next* discretization step
-        int idx = -1;
+        int idx = -1337;
         double frac = -1337.0;
         if (inputVal < disc.begin) {
-            idx = 0;
+            idx = 1;
             frac = 0.0;
         } else if (inputVal > disc.end) {
-            idx = disc.nsteps-1;
+            idx = disc.nsteps-3;
             frac = 0.0;
         } else {
             // solve for `n`: inputVal = begin + n*step
@@ -353,10 +362,10 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
 
         // compute polynomial based on fraction the point is toward the next point
         Polynomial p;
-        p[0] = +0.5*pow(frac - 1.0, 3)*frac*(2.0*frac + 1.0);
-        p[1] = -0.5*(frac - 1.0)*(6.0*pow(frac, 4) - 9.0*pow(frac, 3.0) + 2*frac + 2.0);
-        p[2] = +0.5*frac*(6.0*pow(frac, 4) - 15.0*pow(frac, 3) + 9.0*pow(frac, 2) + frac + 1);
-        p[3] = -0.5*(frac - 1.0)*pow(frac, 3)*(2.0*frac - 3.0);
+        p[0] = (0.5*pow(frac - 1,3)*frac*(2*frac + 1));
+        p[1] = (-0.5*(frac - 1)*(6*pow(frac,4) - 9*pow(frac,3) + 2*frac + 2));
+        p[2] = (0.5*frac*(6*pow(frac,4) - 15*pow(frac,3) + 9*pow(frac,2) + frac + 1));
+        p[3] = (-0.5*(frac - 1)*pow(frac,3)*(2*frac - 3));
 
         closestDiscretizationSteps[coord] = idx;
         betas[coord] = p;
@@ -378,7 +387,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     // of integer offsets that can be -1, 0, 1, or 2
     //
     // the algorithm increments this array as it goes through each permutation
-    std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
+    std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets{};
     for (int coord = 0; coord < nCoords; ++coord) {
         dimIdxOffsets[coord] = -1;
     }
@@ -399,6 +408,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     //     [ 3,  0,  0]   (the termination condition)
 
     double z = 0.0;
+    int cnt = 0;
     while (dimIdxOffsets[0] < 3) {
 
         // compute `beta` (weighted coefficient per coord) for this particular
@@ -425,7 +435,7 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
 
         // equivalent to z += b*v, but handles rounding errors when the rhs
         // is very small
-        z = std::fma(beta, impl.evals[evalIdx], z);
+        z = std::fma(beta, impl.evals.at(evalIdx), z);
 
         // increment the offsets
         //
@@ -433,11 +443,23 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
         {
             int pos = nCoords-1;
             ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-            while (pos > 0 && dimIdxOffsets[pos] >= 2) {  // handle overflows + carry propagation
-                dimIdxOffsets[pos] = 0;  // overflow
+            while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                dimIdxOffsets[pos] = -1;  // overflow
                 ++dimIdxOffsets[pos-1];  // carry propagation
                 --pos;
             }
+        }
+
+        ++cnt;
+    }
+
+    // sanity check: is `z` accumulated from the expected number of iterations?
+    {
+        int expectedIterations = pow(4, nCoords);
+        if (cnt != expectedIterations) {
+            std::stringstream msg;
+            msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+            OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
         }
     }
 
@@ -532,7 +554,6 @@ static double Impl_GetLengtheningSpeed(const OpenSim::FunctionBasedPath::Impl& i
 
         lengtheningSpeed = std::fma(deriv, coordSpeedVal, lengtheningSpeed);
     }
-
     return lengtheningSpeed;
 }
 
@@ -540,24 +561,60 @@ static double Impl_GetLengtheningSpeed(const OpenSim::FunctionBasedPath::Impl& i
 //                               PUBLIC API
 //----------------------------------------------------------------------------
 
-OpenSim::FunctionBasedPath OpenSim::FunctionBasedPath::fromPointBasedPath(
-        const Model& model,
-        const PointBasedPath& pbp)
+OpenSim::FunctionBasedPath::FittingParams::FittingParams() :
+    maxCoordsThatCanAffectPath{g_MaxCoordsThatCanAffectPathDefault},
+    numProbingDiscretizations{g_NumProbingDiscretizationsDefault},
+    minProbingMomentArmChange{g_MinProbingMomentArmChangeDefault},
+    numDiscretizationStepsPerDimension{g_NumDiscretizationStepsPerDimensionDefault}
 {
-    FunctionBasedPath fbp;
+}
+
+std::unique_ptr<OpenSim::FunctionBasedPath> OpenSim::FunctionBasedPath::fromPointBasedPath(
+        const Model& model,
+        const PointBasedPath& pbp,
+        FittingParams params)
+{
+    // sanitize + validate params
+    {
+        if (params.maxCoordsThatCanAffectPath == -1) {
+            params.maxCoordsThatCanAffectPath = g_MaxCoordsThatCanBeInterpolated;
+        }
+
+        if (params.numProbingDiscretizations == -1) {
+            params.numProbingDiscretizations = g_NumProbingDiscretizationsDefault;
+        }
+
+        if (params.minProbingMomentArmChange < 0.0) {
+            params.minProbingMomentArmChange = g_MinProbingMomentArmChangeDefault;
+        }
+
+        if (params.numDiscretizationStepsPerDimension == -1) {
+            params.numDiscretizationStepsPerDimension = g_NumDiscretizationStepsPerDimensionDefault;
+        }
+
+        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath <= 0, OpenSim::Exception, "maximum coordinates that can affect the path must be a positive number that is <16");
+        OPENSIM_THROW_IF(params.numProbingDiscretizations <= 0, OpenSim::Exception, "number of probing discretizations must be a positive number");
+        OPENSIM_THROW_IF(params.minProbingMomentArmChange <= 0, OpenSim::Exception, "min probing moment arm change must be a positive number");
+        OPENSIM_THROW_IF(params.numDiscretizationStepsPerDimension <= 0, OpenSim::Exception, "number of discretization steps per dimension must be a positive number");
+        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath > static_cast<int>(g_MaxCoordsThatCanBeInterpolated), OpenSim::Exception, "maxCoordsThatCanAffectPath must be <=16");
+    }
+
+    std::unique_ptr<FunctionBasedPath> fbp{new FunctionBasedPath{}};
 
     // copy relevant data from source PBP into the output FBP
-    fbp.upd_Appearance() = pbp.get_Appearance();
-    fbp.setPathPointSet(pbp.getPathPointSet());
-    fbp.setPathWrapSet(pbp.getWrapSet());
+    fbp->upd_Appearance() = pbp.get_Appearance();
+    fbp->setPathPointSet(pbp.getPathPointSet());
+    fbp->setPathWrapSet(pbp.getWrapSet());
 
-    OpenSim::FunctionBasedPath::Impl& impl = *fbp._impl;
+    OpenSim::FunctionBasedPath::Impl& impl = *fbp->_impl;
 
     // compute underlying impl data from the PBP
-    Impl_ComputeFromPBP(impl, model, pbp);
+    if (!Impl_ComputeFromPBP(impl, model, pbp, params)) {
+        return nullptr;
+    }
 
     // write impl discretizations into the `Discretizations` property
-    OpenSim::FunctionBasedPathDiscretizationSet& set = fbp.updProperty_FunctionBasedPathDiscretizationSet().updValue();
+    OpenSim::FunctionBasedPathDiscretizationSet& set = fbp->updProperty_FunctionBasedPathDiscretizationSet().updValue();
     for (size_t i = 0; i < impl.coords.size(); ++i) {
         auto disc = std::unique_ptr<OpenSim::FunctionBasedPathDiscretization>{new FunctionBasedPathDiscretization{}};
         disc->set_x_begin(impl.discretizations[i].begin);
@@ -568,8 +625,8 @@ OpenSim::FunctionBasedPath OpenSim::FunctionBasedPath::fromPointBasedPath(
     }
 
     // write evals into `Evaluations` property
-    auto& evalsProp = fbp.updProperty_Evaluations();
-    for (double eval : fbp._impl->evals) {
+    auto& evalsProp = fbp->updProperty_Evaluations();
+    for (double eval : fbp->_impl->evals) {
         evalsProp.appendValue(eval);
     }
 
@@ -579,6 +636,7 @@ OpenSim::FunctionBasedPath OpenSim::FunctionBasedPath::fromPointBasedPath(
 OpenSim::FunctionBasedPath::FunctionBasedPath() : GeometryPath{}, _impl{new Impl{}}
 {
     constructProperty_FunctionBasedPathDiscretizationSet(FunctionBasedPathDiscretizationSet{});
+    constructProperty_Evaluations();
 }
 OpenSim::FunctionBasedPath::FunctionBasedPath(const FunctionBasedPath&) = default;
 OpenSim::FunctionBasedPath::FunctionBasedPath(FunctionBasedPath&&) = default;
@@ -593,7 +651,6 @@ void OpenSim::FunctionBasedPath::extendFinalizeFromProperties()
 
 void OpenSim::FunctionBasedPath::extendFinalizeConnections(OpenSim::Component& root)
 {
-
     // populate pointer-based coordinate lookups
     //
     // the reason this isn't done in `extendFinalizeFromProperties` is because the

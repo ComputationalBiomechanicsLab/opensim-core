@@ -85,11 +85,63 @@ private:
     SimTK::ClonePtr<Impl> _impl;
 
 public:
+    struct FittingParams final {
+
+        // maximum coords that can affect the given PointBasedPath
+        //
+        // if this is higher, more paths may be eligible for
+        // PointBasedPath --> FunctionBasedPath conversion, because some paths may be
+        // affected by more coordinates than other paths. However, be careful. Increasing
+        // this also *significantly* increases the memory usage of the function-based fit
+        //
+        // must be 0 < v <= 16, or -1 to mean "use a sensible default"
+        int maxCoordsThatCanAffectPath;
+
+        // number of discretization steps to use for each coordinate during the "probing
+        // phase"
+        //
+        // in the "probing phase", each coordinate is set to this number of evenly-spaced
+        // values in the range [getRangeMin()..getRangeMax()] (inclusive) to see if changing
+        // that coordinate has any affect on the path. The higher this value is, the longer
+        // the probing phase takes, but the higher chance it has of spotting a pertubation
+        //
+        // must be >0, or -1 to mean "use a sensible default"
+        int numProbingDiscretizations;
+
+        // minimum amount that the moment arm of the path must change by during the "probing phase"
+        // for the coorinate to be classified as affecting the path
+        //
+        // must be >0, or <0 to mean "use a sensible default"
+        double minProbingMomentArmChange;
+
+        // the number of discretization steps for each coordinate that passes the "probing phase" and,
+        // therefore, is deemed to affect the input (point-based) path
+        //
+        // this is effectively "grid granulaity". More discretizations == better fit, but it can increase
+        // the memory usage of the fit significantly. Assume the path is parameterized as an n-dimensional
+        // surface. E.g. if you discretize 10 points over 10 dimensions then you may end up with
+        // 10^10 datapoints (ouch).
+        //
+        // must be >0, or -1 to mean "use a sensible default"
+        int numDiscretizationStepsPerDimension;
+
+        FittingParams();
+    };
+
     /**
-     * Returns an in-memory representation of a FunctionBasedPath generated
-     * by fitting curves against the supplied PointBasedPath.
+     * Tries to compute a `FunctionBasedPath` from the provided `PointBasedPath`, given
+     * the parameters.
+     *
+     * This process can fail (return nullptr) if:
+     *
+     * - No coordinates seem to affect the path
+     * - Too many coordinates (>params.maxCoordsThatCanAffectPath) affect the path
+     *
+     * Otherwise, returns a non-nullptr to the fitted path
      */
-    static FunctionBasedPath fromPointBasedPath(const Model& model, const PointBasedPath& pbp);
+    static std::unique_ptr<FunctionBasedPath> fromPointBasedPath(const Model& model,
+                                                                 const PointBasedPath& pbp,
+                                                                 FittingParams params);
 
     FunctionBasedPath();
     FunctionBasedPath(const FunctionBasedPath&);

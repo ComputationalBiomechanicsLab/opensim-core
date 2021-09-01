@@ -38,6 +38,13 @@ namespace OpenSim {
         OpenSim_DECLARE_PROPERTY(x_begin, double, "The lowest OpenSim::Coordinate value that was used for discretization");
         OpenSim_DECLARE_PROPERTY(x_end, double, "The highest OpenSim:::Coordinate value that was used for discretization");
         OpenSim_DECLARE_PROPERTY(num_points, int, "The number of evenly-spaced OpenSim::Coordinate values between [x_begin, x_end] (inclusive) that were used for discretization of the OpenSim::Coordinate. E.g. [x_begin, 1*(x_begin+((x_end-x_begin)/3)), 2*(x_begin+((x_end-x_begin)/3)), x_end]");
+
+        FunctionBasedPathDiscretization() {
+            constructProperty_coordinate_abspath("");
+            constructProperty_x_begin(0.0);
+            constructProperty_x_end(0.0);
+            constructProperty_num_points(0);
+        }
     };
 }
 
