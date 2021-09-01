@@ -507,7 +507,7 @@ static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl cons
     // compute value at current point
     double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
 
-    static constexpr double h = 0.0001;
+    static constexpr double h = 0.000001;
 
     // alter the input value for the to-be-derived coordinate *slightly* and recompute
     inputVals[coordIdx] += h;
