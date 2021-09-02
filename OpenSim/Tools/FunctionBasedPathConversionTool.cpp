@@ -1,18 +1,23 @@
-#include <OpenSim/OpenSim.h>
 #include "FunctionBasedPathConversionTool.h"
-#include <vector>
-#include <iostream>
-#include <fstream>
-#include <cstring>
-#include <cstdio>
-#include <cstddef>
+
+#include <OpenSim/Common/Logger.h>
+#include <OpenSim/Common/Component.h>
+#include <OpenSim/Simulation/Model/Model.h>
+#include <OpenSim/Simulation/Model/PathActuator.h>
+#include <OpenSim/Simulation/Model/PointBasedPath.h>
+
+#include <memory>
+#include <stdexcept>
+#include <string>
 #include <sstream>
+#include <vector>
 
 using namespace OpenSim;
 
 OpenSim::FunctionBasedPathConversionTool::FunctionBasedPathConversionTool() :
     _modelPath{},
     _newModelName{},
+    _params{},
     _verbose{false}
 {
 }
@@ -23,6 +28,7 @@ OpenSim::FunctionBasedPathConversionTool::FunctionBasedPathConversionTool(
 
     _modelPath{modelPath},
     _newModelName{newModelName},
+    _params{},
     _verbose{false}
 {
 }
@@ -47,6 +53,22 @@ void OpenSim::FunctionBasedPathConversionTool::setNewModelName(const std::string
     _newModelName = newModelName;
 }
 
+const FunctionBasedPath::FittingParams& OpenSim::FunctionBasedPathConversionTool::getFittingParams() const {
+    return _params;
+}
+
+void OpenSim::FunctionBasedPathConversionTool::setFittingParams(const FunctionBasedPath::FittingParams& p) {
+    _params = p;
+}
+
+bool OpenSim::FunctionBasedPathConversionTool::getVerbose() const {
+    return _verbose;
+}
+
+void OpenSim::FunctionBasedPathConversionTool::setVerbose(bool v) {
+    _verbose = v;
+}
+
 bool OpenSim::FunctionBasedPathConversionTool::run()
 {
     Model sourceModel{_modelPath};
@@ -60,6 +82,7 @@ bool OpenSim::FunctionBasedPathConversionTool::run()
 
     // print source model structure when runnning in verbose mode
     if (_verbose) {
+        OpenSim::log_info("printing source model info");
         sourceModel.printSubcomponentInfo();
     }
 
@@ -114,15 +137,38 @@ bool OpenSim::FunctionBasedPathConversionTool::run()
     // for each `PathActuator` that uses a PBP, create an equivalent
     // `FunctionBasedPath` (FBP) by fitting a function against the PBP and
     // replace the PBP owned by the destination's `PathActuator` with the FBP
+    if (_verbose) {
+        OpenSim::log_info("using fitting params: maxCoordsThatCanAffectPath = {}, minProbingMomentArmChange = {}, numDiscretizationStepsPerDimension = {}, numProbingDiscretizations = {}",
+                          _params.maxCoordsThatCanAffectPath,
+                          _params.minProbingMomentArmChange,
+                          _params.numDiscretizationStepsPerDimension,
+                          _params.numProbingDiscretizations);
+    }
     for (const PBPtoActuatorMapping& mapping : mappings) {
         // create an FBP in-memory
-        FunctionBasedPath::FittingParams p;
-        std::unique_ptr<FunctionBasedPath> maybeFbp = FunctionBasedPath::fromPointBasedPath(sourceModel, mapping.sourcePBP, p);
+
+        if (_verbose) {
+            OpenSim::log_info("attempting to convert point-based path '{}' into a FunctionBasedPath", mapping.sourcePBP.getAbsolutePathString());
+        }
+
+        std::unique_ptr<FunctionBasedPath> maybeFbp = FunctionBasedPath::fromPointBasedPath(sourceModel, mapping.sourcePBP, _params);
+
+        if (_verbose) {
+            if (maybeFbp) {
+                OpenSim::log_info("successfully converted '{}' into a FunctionBasedPath", mapping.sourcePBP.getAbsolutePathString());
+            } else {
+                OpenSim::log_info("failed to convert '{}' into a FunctionBasedPath", mapping.sourcePBP.getAbsolutePathString());
+            }
+        }
 
         if (maybeFbp) {
             // assign the FBP over the destination's PBP
             mapping.outputActuator.updProperty_GeometryPath().setValue(*maybeFbp);
         }
+    }
+
+    if (_verbose) {
+        OpenSim::log_info("finished attempting to fit all point based paths: emitting new output model that contains FunctionBasedPaths");
     }
 
     // the output model is now the same as the source model, but each PBP in
@@ -131,13 +177,13 @@ bool OpenSim::FunctionBasedPathConversionTool::run()
     outputModel.finalizeFromProperties();
     outputModel.finalizeConnections();
     outputModel.initSystem();
-    outputModel.print(std::string{_newModelName} + ".osim");
+    outputModel.print(_newModelName);
 
     if (_verbose) {
-        std::cerr << "--- interpolation complete ---\n\n"
-                  << "model before:\n";
+        OpenSim::log_info("--- interpolation complete ---");
+        OpenSim::log_info("model before:");
         sourceModel.printSubcomponentInfo();
-        std::cerr << "\nmodel after:\n";
+        OpenSim::log_info("model after:");
         outputModel.printSubcomponentInfo();
     }
 

@@ -9,11 +9,11 @@
 #include <memory>
 #include <vector>
 
-static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 16;  // important: upper limit that's used for stack allocations
+static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 8;  // important: upper limit that's used for stack allocations
 static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxCoordsThatCanBeInterpolated);
 static constexpr int g_NumProbingDiscretizationsDefault = 8;
 static constexpr double g_MinProbingMomentArmChangeDefault = 0.001;
-static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 64;
+static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 8;
 
 // returns `true` if changing the supplied `Coordinate` changes the moment arm
 // of the supplied `PointBasedPath` (PBP)
@@ -44,8 +44,8 @@ static bool coordAffectsPBP(
         }
     }
 
-    c.setLocked(state, initialLockedState);
     c.setValue(state, initialValue);
+    c.setLocked(state, initialLockedState);
 
     return affectsCoord;
 }
@@ -337,20 +337,20 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
     for (int coord = 0; coord < nCoords; ++coord) {
         double inputVal = inputVals[coord];
         Discretization const& disc = impl.discretizations[coord];
+        double step = (disc.end - disc.begin) / (disc.nsteps - 1);
 
         // compute index of first discretization step *before* the input value and
         // the fraction that the input value is towards the *next* discretization step
         int idx;
         double frac;
-        if (inputVal < disc.begin) {
+        if (inputVal < disc.begin+step) {
             idx = 1;
             frac = 0.0;
-        } else if (inputVal > disc.end) {
+        } else if (inputVal > disc.end-2*step) {
             idx = disc.nsteps-3;
             frac = 0.0;
         } else {
             // solve for `n`: inputVal = begin + n*step
-            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
             double n = (inputVal - disc.begin) / step;
             double wholePart;
             double fractionalPart = std::modf(n, &wholePart);
@@ -597,11 +597,11 @@ std::unique_ptr<OpenSim::FunctionBasedPath> OpenSim::FunctionBasedPath::fromPoin
             params.numDiscretizationStepsPerDimension = g_NumDiscretizationStepsPerDimensionDefault;
         }
 
-        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath <= 0, OpenSim::Exception, "maximum coordinates that can affect the path must be a positive number that is <16");
-        OPENSIM_THROW_IF(params.numProbingDiscretizations <= 0, OpenSim::Exception, "number of probing discretizations must be a positive number");
-        OPENSIM_THROW_IF(params.minProbingMomentArmChange <= 0, OpenSim::Exception, "min probing moment arm change must be a positive number");
-        OPENSIM_THROW_IF(params.numDiscretizationStepsPerDimension <= 0, OpenSim::Exception, "number of discretization steps per dimension must be a positive number");
-        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath > static_cast<int>(g_MaxCoordsThatCanBeInterpolated), OpenSim::Exception, "maxCoordsThatCanAffectPath must be <=16");
+        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath <= 0, OpenSim::Exception, "maxCoordsThatCanAffectPath must be a positive number that is <=8");
+        OPENSIM_THROW_IF(params.maxCoordsThatCanAffectPath > static_cast<int>(g_MaxCoordsThatCanBeInterpolated), OpenSim::Exception, "maxCoordsThatCanAffectPath must be a positive number that is <=8");
+        OPENSIM_THROW_IF(params.numProbingDiscretizations <= 0, OpenSim::Exception, "numProbingDiscretizations must be a positive number");
+        OPENSIM_THROW_IF(params.minProbingMomentArmChange <= 0, OpenSim::Exception, "minProbingMomentArmChange must be a positive number");
+        OPENSIM_THROW_IF(params.numDiscretizationStepsPerDimension <= 0, OpenSim::Exception, "numDiscretizationStepsPerDimension must be a positive number");
     }
 
     std::unique_ptr<FunctionBasedPath> fbp{new FunctionBasedPath{}};

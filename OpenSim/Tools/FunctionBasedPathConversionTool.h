@@ -50,6 +50,7 @@ class OSIMTOOLS_API FunctionBasedPathConversionTool: public AbstractTool {
 private:
     std::string _modelPath;
     std::string _newModelName;
+    FunctionBasedPath::FittingParams _params;
     bool _verbose;
 
 public:
@@ -61,6 +62,12 @@ public:
 
     const std::string& getNewModelName() const;
     void setNewModelName(const std::string&);
+
+    const FunctionBasedPath::FittingParams& getFittingParams() const;
+    void setFittingParams(const FunctionBasedPath::FittingParams&);
+
+    bool getVerbose() const;
+    void setVerbose(bool);
 
     bool run() override SWIG_DECLARE_EXCEPTION;
 };
