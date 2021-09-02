@@ -62,6 +62,8 @@
 
 #include "Model/GeometryPath.h"
 #include "Model/PointBasedPath.h"
+#include "Model/FunctionBasedPathDiscretization.h"
+#include "Model/FunctionBasedPathDiscretizationSet.h"
 #include "Model/FunctionBasedPath.h"
 
 #include "Model/PrescribedForce.h"
@@ -193,8 +195,9 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( FrameGeometry());
     Object::registerType( Arrow());
 
-//    Object::registerType( GeometryPath());
     Object::registerType( OpenSim::PointBasedPath());
+    Object::registerType( OpenSim::FunctionBasedPathDiscretization());
+    Object::registerType( OpenSim::FunctionBasedPathDiscretizationSet());
     Object::registerType( OpenSim::FunctionBasedPath());
 
     Object::registerType( ControlSet() );

@@ -38,17 +38,165 @@
 
 using namespace OpenSim;
 
-void testArmModelConversionAccuracy() {
+// output reporter that just appends some double output to an output vector
+class VectorReporter final : public AbstractReporter {
+public:
+    struct Datapoint { double time; double v; };
+private:
+    const Output<double>& m_Source;
+    std::vector<Datapoint>& m_Sink;
+
+public:
+    VectorReporter(const Output<double>& source,
+                   std::vector<Datapoint>& sink) :
+        AbstractReporter{},
+        m_Source{source},
+        m_Sink{sink}
+    {
+    }
+
+    void implementReport(const SimTK::State& s) const override {
+        double t = s.getTime();
+        double v = m_Source.getValue(s);
+
+        m_Sink.push_back(Datapoint{t, v});
+    }
+
+    VectorReporter* clone() const override {
+        return new VectorReporter{*this};
+    }
+
+    const std::string& getConcreteClassName() const override {
+        static std::string name = "VectorReporter";
+        return name;
+    }
+};
+
+static void testLengthDifferenceBetweenFBPAndPBPIsSmall() {
     std::string inputModelPath = "arm26.osim";
-    std::string outputModelName = "arm26_FBP";
+    std::string outputModelName = "arm26_FBP.osim";
+    std::string force = "/forceset/TRIlong";
+    std::string output = "length";
+    double reportingInterval = 0.05;
+    int discretizationPoints = 80;
+
+    FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
+    auto params = tool.getFittingParams();
+    params.numDiscretizationStepsPerDimension = discretizationPoints;
+    tool.setFittingParams(params);
+    tool.setVerbose(true);
+    tool.run();
+
+    // load + init both models
+    Model inputModel{inputModelPath};
+    inputModel.finalizeConnections();
+    inputModel.finalizeFromProperties();
+    inputModel.initSystem();
+
+    Model outputModel{outputModelName};
+    outputModel.finalizeConnections();
+    outputModel.finalizeFromProperties();
+    outputModel.initSystem();
+
+    // connect input model's force output to a vector that records the data
+    std::vector<VectorReporter::Datapoint> pbpDatapoints;
+    {
+        const AbstractOutput& ao = inputModel.getComponent(force + "/pointbasedpath").getOutput(output);
+        const Output<double>* o = dynamic_cast<const Output<double>*>(&ao);
+        if (!o) {
+            throw std::runtime_error{"Input model output is not of `double` type"};
+        }
+        auto reporter = std::unique_ptr<VectorReporter>(new VectorReporter{*o, pbpDatapoints});
+        reporter->set_report_time_interval(reportingInterval);
+        inputModel.addComponent(reporter.release());
+    }
+
+    // connect output model's force output to a vector that records the data
+    std::vector<VectorReporter::Datapoint> fbpDatapoints;
+    {
+        const AbstractOutput& ao = outputModel.getComponent(force + "/functionbasedpath").getOutput(output);
+        const Output<double>* o = dynamic_cast<const Output<double>*>(&ao);
+        if (!o) {
+            throw std::runtime_error{"Input model output is not of `double` type"};
+        }
+        auto reporter = std::unique_ptr<VectorReporter>(new VectorReporter{*o, fbpDatapoints});
+        reporter->set_report_time_interval(reportingInterval);
+        outputModel.addComponent(reporter.release());
+    }
+
+    // init initial system + states
+    double finalSimTime = 3.5;
+
+    // run FD sim of PBP
+    {
+        SimTK::State& inputModelState = inputModel.initSystem();
+        OpenSim::Manager manager{inputModel};
+        manager.initialize(inputModelState);
+        manager.integrate(finalSimTime);
+    }
+
+    // run FD sim of FBP
+    {
+        SimTK::State& outputModelState = outputModel.initSystem();
+        OpenSim::Manager manager{outputModel};
+        manager.initialize(outputModelState);
+        manager.integrate(finalSimTime);
+    }
+
+    // validate API assumptions
+    size_t expectedSteps = static_cast<size_t>(finalSimTime / reportingInterval);
+    {
+        OPENSIM_THROW_IF(pbpDatapoints.empty(), OpenSim::Exception, "pbpDatapoints empty: is it connected to the model?");
+        OPENSIM_THROW_IF(fbpDatapoints.empty(), OpenSim::Exception, "fbpDatapoints empty: is it connected to the model?");
+        OPENSIM_THROW_IF(pbpDatapoints.size() == expectedSteps, OpenSim::Exception, "pbpDatapoints has incorrect number of datapoints");
+        OPENSIM_THROW_IF(fbpDatapoints.size() == expectedSteps, OpenSim::Exception, "fbpDatapoints has incorrect number of datapoints");
+
+        for (size_t i = 0; i < expectedSteps; ++i) {
+            double pbpT = pbpDatapoints[i].time;
+            double fbpT = fbpDatapoints[i].time;
+            OPENSIM_THROW_IF(!SimTK::isNumericallyEqual(pbpT, fbpT), OpenSim::Exception, "timepoints in PBP and FBP arrays differ");
+        }
+    }
+
+    struct RelErrStats {
+        double min = std::numeric_limits<double>::max();
+        double max = std::numeric_limits<double>::min();
+        double avg = 0.0;
+        int n = 0;
+    };
+    RelErrStats stats;
+
+    std::cout << "t    \tpbp  \tfbp  \t%err \n";
+    for (size_t i = 0; i < expectedSteps; ++i) {
+        double t = pbpDatapoints[i].time;
+        double pbpV = pbpDatapoints[i].v;
+        double fbpV = fbpDatapoints[i].v;
+        double relErr = (fbpV-pbpV)/pbpV;
+        double relPctErr = 100.0 * relErr;
+
+        stats.min = std::min(stats.min, relErr);
+        stats.max = std::max(stats.max, relErr);
+        stats.avg = std::fma(stats.avg, stats.n, relErr) / (stats.n+1);
+        stats.n += 1;
+
+        std::cout << std::fixed << std::setprecision(5) << t << '\t' << pbpV << '\t' << fbpV << '\t' << relPctErr << " %\n";
+    }
+
+    std::cout << "min = " << 100.0*stats.min << " %, max = " << 100.0*stats.max << " %, avg = " << 100.0*stats.avg << " %\n";
+}
+
+static void testArmModelConversionAccuracy() {
+    std::string inputModelPath = "arm26.osim";
+    std::string outputModelName = "arm26_FBP.osim";
 
     // run the function-based path (FBP) conversion tool to create an FBP-based output
     FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
+    tool.setVerbose(true);
     tool.run();
 
     // load both the input and output into memory
     Model inputModel{inputModelPath};
-    Model outputModel{outputModelName + ".osim"};
+    Model outputModel{outputModelName};
 
     // init the input model
     inputModel.finalizeConnections();
@@ -71,7 +219,7 @@ void testArmModelConversionAccuracy() {
     std::string output = "length";
 
     // connect reporter to input model
-    {
+    if (true) {
         auto inputModelReporter = std::unique_ptr<ConsoleReporter>{new ConsoleReporter{}};
         inputModelReporter->setName("point_results");
         inputModelReporter->set_report_time_interval(0.05);
@@ -80,7 +228,7 @@ void testArmModelConversionAccuracy() {
     }
 
     // connect reporter to output model
-    {
+    if (true) {
         auto outputModelReporter = std::unique_ptr<ConsoleReporter>{new ConsoleReporter{}};
         outputModelReporter ->setName("function_results");
         outputModelReporter ->set_report_time_interval(0.05);
@@ -142,7 +290,7 @@ void testArmModelConversionAccuracy() {
 
         long millis = static_cast<long>(std::chrono::duration_cast<std::chrono::milliseconds>(ts.simTime).count());
 
-        printf("%s: \n    avg. time (ms) = %ld \n    integration steps attempted = %i \n    integration steps taken = %i)",
+        printf("%s: \n    avg. time (ms) = %ld \n    integration steps attempted = %i \n    integration steps taken = %i)\n",
                ts.name.c_str(),
                millis,
                ts.stepsAttempted,
@@ -153,6 +301,7 @@ void testArmModelConversionAccuracy() {
 int main() {
     try {
         SimTK_START_TEST("testFunctionBasedPathConversion");
+            SimTK_SUBTEST(testLengthDifferenceBetweenFBPAndPBPIsSmall);
             SimTK_SUBTEST(testArmModelConversionAccuracy);
         SimTK_END_TEST();
     } catch (const std::exception& ex) {
