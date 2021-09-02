@@ -9,7 +9,7 @@
 #include <memory>
 #include <vector>
 
-static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 8;  // important: upper limit that's used for stack allocations
+static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 8;  // important: this is an upper limit that's used for stack allocations
 static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxCoordsThatCanBeInterpolated);
 static constexpr int g_NumProbingDiscretizationsDefault = 8;
 static constexpr double g_MinProbingMomentArmChangeDefault = 0.001;
@@ -31,7 +31,7 @@ static bool coordAffectsPBP(
 
     double start = c.getRangeMin();
     double end = c.getRangeMax();
-    double step = (end - start) / numProbingSteps;
+    double step = (end - start) / (numProbingSteps-1);
 
     bool affectsCoord = false;
     for (double v = start; v <= end; v += step) {
@@ -86,16 +86,14 @@ struct Discretization final {
 };
 
 // compute ideal discretization of the given coordinate
-static Discretization discretizationForCoord(OpenSim::Coordinate const&, int numDiscretizationSteps) {
-    // TODO: these hacky ranges were imported from the original code. Joris had this
-    // commented out:
-    //     dc.begin = std::max(c.getRangeMin(), -static_cast<double>(SimTK_PI));
-    //     dc.end = std::min(c.getRangeMax(), static_cast<double>(SimTK_PI));
+static Discretization discretizationForCoord(OpenSim::Coordinate const& c, int numDiscretizationSteps) {
     SimTK_ASSERT_ALWAYS(numDiscretizationSteps >= 4, "need to supply more than 4 discretization steps");
 
     Discretization d;
-    d.begin = -static_cast<double>(SimTK_PI)/2;
-    d.end = static_cast<double>(SimTK_PI)/2;
+    //d.begin = -static_cast<double>(SimTK_PI)/2;
+    //d.end = static_cast<double>(SimTK_PI)/2;
+    d.begin = std::max(c.getRangeMin(), -static_cast<double>(SimTK_PI));
+    d.end = std::min(c.getRangeMax(), static_cast<double>(SimTK_PI));
     d.nsteps = numDiscretizationSteps - 3;
     double step = (d.end-d.begin) / (d.nsteps-1);
 
@@ -151,7 +149,7 @@ static std::vector<double> computeEvaluationsFromPBP(OpenSim::PointBasedPath con
         for (size_t coord = 0; coord < ncoords; ++coord) {
             Discretization const& discr = discs[coord];
 
-            double stepSz = (discr.end - discr.begin) / discr.nsteps;
+            double stepSz = (discr.end - discr.begin) / (discr.nsteps - 1);
             int step = discStepIdx[coord];
             double val =  discr.begin + step*stepSz;
 
@@ -507,7 +505,7 @@ static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl cons
     // compute value at current point
     double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
 
-    static constexpr double h = 0.000001;
+    static constexpr double h = 0.00001;
 
     // alter the input value for the to-be-derived coordinate *slightly* and recompute
     inputVals[coordIdx] += h;
