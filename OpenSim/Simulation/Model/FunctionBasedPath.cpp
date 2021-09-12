@@ -486,15 +486,42 @@ static double Impl_GetPathLength(OpenSim::FunctionBasedPath::Impl const& impl,
 
 // get the *derivative* of the path length with respect to the given Coordinate index
 // (in impl.coords)
+//static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl const& impl,
+//                                           SimTK::State const& s,
+//                                           int coordIdx) {
+
+//    SimTK_ASSERT_ALWAYS(!impl.coords.empty(), "FBPs require at least one coordinate to affect the path");
+//    SimTK_ASSERT_ALWAYS(coordIdx != -1, "coord index must be valid");
+//    SimTK_ASSERT_ALWAYS(coordIdx < static_cast<int>(impl.coords.size()), "coord index must be valid");
+
+//    int nCoords = static_cast<int>(impl.coords.size());
+
+//    // get the input value of each coordinate in the current state
+//    std::array<double, g_MaxCoordsThatCanBeInterpolated> inputVals{};
+//    for (int coord = 0; coord < nCoords; ++coord) {
+//        inputVals[coord] = impl.coords[coord]->getValue(s);
+//    }
+
+//    // compute value at current point
+//    double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
+
+//    static constexpr double h = 0.00001;
+
+//    // alter the input value for the to-be-derived coordinate *slightly* and recompute
+//    inputVals[coordIdx] += h;
+//    double v2 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
+
+//    // the derivative is how much the output changed when the input was altered
+//    // slightly (this is a poor-man's discrete derivative method)
+//    return (v2 - v1) / h;
+//}
 static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl const& impl,
-                                           SimTK::State const& s,
-                                           int coordIdx) {
+                                 SimTK::State const& s,
+                                 int coordIdx) {
+    int nCoords = static_cast<int>(impl.coords.size());
 
     SimTK_ASSERT_ALWAYS(!impl.coords.empty(), "FBPs require at least one coordinate to affect the path");
-    SimTK_ASSERT_ALWAYS(coordIdx != -1, "coord index must be valid");
-    SimTK_ASSERT_ALWAYS(coordIdx < static_cast<int>(impl.coords.size()), "coord index must be valid");
-
-    int nCoords = static_cast<int>(impl.coords.size());
+    SimTK_ASSERT_ALWAYS(nCoords == static_cast<int>(impl.coords.size()), "You must call this function with the correct number of (precomputed) coordinate values");
 
     // get the input value of each coordinate in the current state
     std::array<double, g_MaxCoordsThatCanBeInterpolated> inputVals{};
@@ -502,18 +529,113 @@ static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl cons
         inputVals[coord] = impl.coords[coord]->getValue(s);
     }
 
-    // compute value at current point
-    double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
+    // compute:
+    //
+    // - the index of the first discretization step *before* the input value
+    //
+    // - the polynomial of the curve at that step, given its fractional distance
+    //   toward the next step
+    using Polynomial = std::array<double, 4>;
+    std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
+    std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
+    for (int coord = 0; coord < nCoords; ++coord) {
+        double inputVal = inputVals[coord];
+        Discretization const& disc = impl.discretizations[coord];
+        double step = (disc.end - disc.begin) / (disc.nsteps - 1);
 
-    static constexpr double h = 0.00001;
+        // compute index of first discretization step *before* the input value and
+        // the fraction that the input value is towards the *next* discretization step
+        int idx;
+        double frac;
+        if (inputVal < disc.begin+step) {
+            idx = 1;
+            frac = 0.0;
+        } else if (inputVal > disc.end-2*step) {
+            idx = disc.nsteps-3;
+            frac = 0.0;
+        } else {
+            // solve for `n`: inputVal = begin + n*step
+            double n = (inputVal - disc.begin) / step;
+            double wholePart;
+            double fractionalPart = std::modf(n, &wholePart);
 
-    // alter the input value for the to-be-derived coordinate *slightly* and recompute
-    inputVals[coordIdx] += h;
-    double v2 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
+            idx = static_cast<int>(wholePart);
+            frac = fractionalPart;
+        }
 
-    // the derivative is how much the output changed when the input was altered
-    // slightly (this is a poor-man's discrete derivative method)
-    return (v2 - v1) / h;
+        // compute polynomial based on fraction the point is toward the next point
+        double frac2 = frac*frac;
+        double frac3 = frac2*frac;
+        double frac4 = frac3*frac;
+        double fracMinusOne = frac - 1;
+        double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
+
+        Polynomial p;
+        if (coord == coordIdx){
+            // derivative
+            p[0] = 5*frac4 - 10*frac3 + 4.5*frac2 + frac - 0.5;
+            p[1] = -15*frac4 + 30*frac3 - 13.5*frac2 - 2*frac;
+            p[2] = 15*frac4 - 30*frac3 + 13.5*frac2 + frac + 0.5;
+            p[3] = frac2*(-5*frac2 + 10*frac - 4.5);
+        } else {
+            // 'normal' spline function
+            p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
+            p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
+            p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
+            p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
+        }
+
+        closestDiscretizationSteps[coord] = idx;
+        betas[coord] = p;
+    }
+
+    std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
+    for (int coord = 0; coord < nCoords; ++coord) {
+        dimIdxOffsets[coord] = -1;
+    }
+
+    double z = 0.0;
+    int cnt = 0;
+    while (dimIdxOffsets[0] < 3) {
+
+        double beta = 1.0;
+        int evalStride = 1;
+        int evalIdx = 0;
+
+        for (int coord = nCoords-1; coord >= 0; --coord) {
+            int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
+            int closestStep = closestDiscretizationSteps[coord];
+            int step = closestStep + offset;
+
+            beta *= betas[coord][offset+1];
+            evalIdx += evalStride * step;
+            evalStride *= impl.discretizations[coord].nsteps;
+        }
+
+        double gridSize = (impl.discretizations[coordIdx].end-impl.discretizations[coordIdx].begin)/impl.discretizations[coordIdx].nsteps;
+        z = std::fma(beta, impl.evals.at(evalIdx)/gridSize, z);
+        {
+            int pos = nCoords-1;
+            ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
+            while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                dimIdxOffsets[pos] = -1;  // overflow
+                ++dimIdxOffsets[pos-1];  // carry propagation
+                --pos;
+            }
+        }
+
+        ++cnt;
+    }
+    {
+        int expectedIterations = 1 << (2*nCoords);
+        if (cnt != expectedIterations) {
+            std::stringstream msg;
+            msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+            OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
+        }
+    }
+
+    return z;
 }
 
 // get the *derivative* of the path length with respect to the given Coordinate

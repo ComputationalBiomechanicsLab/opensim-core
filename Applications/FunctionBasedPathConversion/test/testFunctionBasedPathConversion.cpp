@@ -73,12 +73,23 @@ public:
 };
 
 static void testLengthDifferenceBetweenFBPAndPBPIsSmall() {
-    std::string inputModelPath = "arm26.osim";
-    std::string outputModelName = "arm26_FBP.osim";
-    std::string force = "/forceset/TRIlong";
+//    std::string inputModelPath = "ToyLandingModel.osim";
+//    std::string outputModelName = "ToyLandingModel_FBP.osim";
+//    std::string force = "/forceset/glut_med1_r";
+//    std::string output = "length";
+
+//    std::string inputModelPath = "arm26.osim";
+//    std::string outputModelName = "arm26_FBP.osim";
+//    std::string force = "/forceset/TRIlong";
+//    std::string output = "length";
+
+    std::string inputModelPath = "SoccerKickingModel.osim";
+    std::string outputModelName = "SoccerKickingModel_FBP.osim";
+    std::string force = "/forceset/bifemlh_r";
     std::string output = "length";
+
     double reportingInterval = 0.05;
-    int discretizationPoints = 80;
+    int discretizationPoints = 20;
 
     FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
     auto params = tool.getFittingParams();
