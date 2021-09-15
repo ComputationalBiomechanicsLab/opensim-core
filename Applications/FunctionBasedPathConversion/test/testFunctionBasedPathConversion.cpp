@@ -75,25 +75,26 @@ public:
 static void testLengthDifferenceBetweenFBPAndPBPIsSmall() {
 //    std::string inputModelPath = "ToyLandingModel.osim";
 //    std::string outputModelName = "ToyLandingModel_FBP.osim";
-//    std::string force = "/forceset/glut_med1_r";
+//    std::string force = "/forceset/per_long_r";
 //    std::string output = "length";
 
-//    std::string inputModelPath = "arm26.osim";
-//    std::string outputModelName = "arm26_FBP.osim";
-//    std::string force = "/forceset/TRIlong";
-//    std::string output = "length";
-
-    std::string inputModelPath = "SoccerKickingModel.osim";
-    std::string outputModelName = "SoccerKickingModel_FBP.osim";
-    std::string force = "/forceset/bifemlh_r";
+    std::string inputModelPath = "arm26.osim";
+    std::string outputModelName = "arm26_FBP.osim";
+    std::string force = "/forceset/TRIlong";
     std::string output = "length";
 
+//    std::string inputModelPath = "SoccerKickingModel.osim";
+//    std::string outputModelName = "SoccerKickingModel_FBP.osim";
+//    std::string force = "/forceset/bifemlh_r";
+//    std::string output = "length";
+
     double reportingInterval = 0.05;
-    int discretizationPoints = 20;
+    int discretizationPoints = 10;
 
     FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
     auto params = tool.getFittingParams();
     params.numDiscretizationStepsPerDimension = discretizationPoints;
+//    params.maxCoordsThatCanAffectPath = 2;
     tool.setFittingParams(params);
     tool.setVerbose(true);
     tool.run();
@@ -136,7 +137,7 @@ static void testLengthDifferenceBetweenFBPAndPBPIsSmall() {
     }
 
     // init initial system + states
-    double finalSimTime = 3.5;
+    double finalSimTime = 1.0;
 
     // run FD sim of PBP
     {
@@ -197,11 +198,23 @@ static void testLengthDifferenceBetweenFBPAndPBPIsSmall() {
 }
 
 static void testArmModelConversionAccuracy() {
+//    std::string inputModelPath = "ToyLandingModel.osim";
+//    std::string outputModelName = "ToyLandingModel_FBP.osim";
+//    std::string force = "/forceset/per_long_r";
+//    std::string output = "length";
+
     std::string inputModelPath = "arm26.osim";
     std::string outputModelName = "arm26_FBP.osim";
+    std::string force = "/forceset/TRIlong";
+    std::string output = "length";
 
     // run the function-based path (FBP) conversion tool to create an FBP-based output
     FunctionBasedPathConversionTool tool{inputModelPath, outputModelName};
+
+    auto params = tool.getFittingParams();
+    params.numDiscretizationStepsPerDimension = 10;
+//    params.maxCoordsThatCanAffectPath = 2;
+    tool.setFittingParams(params);
     tool.setVerbose(true);
     tool.run();
 
@@ -224,10 +237,6 @@ static void testArmModelConversionAccuracy() {
 
     std::cout << "----- output model details -----\n";
     outputModel.printSubcomponentInfo();
-
-    // connect reporters to each model
-    std::string force = "/forceset/TRIlong";
-    std::string output = "length";
 
     // connect reporter to input model
     if (true) {
@@ -278,8 +287,8 @@ static void testArmModelConversionAccuracy() {
     // setup + run the tests
     TestStats inputStats{"Input Model (point-based paths)"};
     TestStats outputStats{"Output Model (function-based paths)"};
-    int numRepeats = 10;
-    double finalSimTime = 3.5;
+    int numRepeats = 25;
+    double finalSimTime = 1.0;
 
     // exercise input model
     std::cerr << "----- running input model (point based path) tests -----\n";
