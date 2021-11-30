@@ -26,6 +26,8 @@
 //=============================================================================
 #include "PathActuator.h"
 
+#include <OpenSim/Simulation/Model/PointBasedPath.h>
+
 using namespace OpenSim;
 using namespace std;
 
@@ -62,7 +64,7 @@ void PathActuator::setNull()
  */
 void PathActuator::constructProperties()
 {
-    constructProperty_GeometryPath(GeometryPath());
+    constructProperty_GeometryPath(PointBasedPath{});
     constructProperty_optimal_force(1.0);
 }
 

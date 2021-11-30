@@ -25,7 +25,8 @@
 // INCLUDES
 //=============================================================================
 #include "PathSpring.h"
-#include "GeometryPath.h"
+
+#include <OpenSim/Simulation/Model/PointBasedPath.h>
 #include "PointForceDirection.h"
 
 //=============================================================================
@@ -64,7 +65,7 @@ PathSpring::PathSpring(const string& name, double restLength,
 void PathSpring::constructProperties()
 {
     setAuthors("Ajay Seth");
-    constructProperty_GeometryPath(GeometryPath());
+    constructProperty_GeometryPath(PointBasedPath{});
     constructProperty_resting_length(SimTK::NaN);
     constructProperty_stiffness(SimTK::NaN);
     constructProperty_dissipation(SimTK::NaN);

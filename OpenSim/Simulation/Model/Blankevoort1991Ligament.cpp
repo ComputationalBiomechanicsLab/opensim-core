@@ -21,9 +21,11 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
-#include <OpenSim/Simulation/Model/Model.h>
-#include <OpenSim/Simulation/Model/PointForceDirection.h>
 #include "Blankevoort1991Ligament.h"
+
+#include <OpenSim/Simulation/Model/Model.h>
+#include <OpenSim/Simulation/Model/PointBasedPath.h>
+#include <OpenSim/Simulation/Model/PointForceDirection.h>
 
 using namespace OpenSim;
 
@@ -81,7 +83,7 @@ void Blankevoort1991Ligament::setNull()
 }
 
 void Blankevoort1991Ligament::constructProperties() {
-    constructProperty_GeometryPath(GeometryPath());
+    constructProperty_GeometryPath(PointBasedPath{});
     constructProperty_linear_stiffness(1.0);
     constructProperty_transition_strain(0.06);
     constructProperty_damping_coefficient(0.003);
