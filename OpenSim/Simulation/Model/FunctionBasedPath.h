@@ -3,6 +3,7 @@
 
 #include <OpenSim/Common/Array.h>
 #include <OpenSim/Simulation/Model/GeometryPath.h>
+#include <OpenSim/Simulation/Model/ModelComponent.h>
 #include <SimTKcommon/internal/Vec.h>
 #include <SimTKcommon/internal/Vector_.h>
 
@@ -31,15 +32,17 @@ class PointForceDirection;
  * that automatically handles forwarding calls to the `PathFunction`, state
  * caching, etc.
  */
-class PathFunction : public OpenSim::Component {
+class PathFunction : public OpenSim::ModelComponent {
     OpenSim_DECLARE_ABSTRACT_OBJECT(PathFunction, OpenSim::Component)
 
 public:
     virtual ~PathFunction() noexcept = default;
 
-    virtual double getLength(const SimTK::State&) = 0;
-    virtual double getLengtheningSpeed(const SimTK::State&) = 0;
-    virtual double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) = 0;
+    virtual double getLength(const SimTK::State&) const = 0;
+    virtual double getLengtheningSpeed(const SimTK::State&) const = 0;
+    virtual double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const = 0;
+    virtual void getPointForceDirections(const SimTK::State& s, OpenSim::Array<PointForceDirection*>* rPFDs) const = 0;
+    virtual void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const = 0;
 };
 
 /**
@@ -62,6 +65,7 @@ public:
     FunctionBasedPath();
     FunctionBasedPath(const FunctionBasedPath&);
     FunctionBasedPath(FunctionBasedPath&&) noexcept;
+    explicit FunctionBasedPath(PathFunction const&);
     ~FunctionBasedPath() noexcept;
 
     FunctionBasedPath& operator=(FunctionBasedPath const&);
@@ -86,6 +90,7 @@ public:
                             const Coordinate& aCoord) const override;
 
     void extendAddToSystem(SimTK::MultibodySystem& system) const override;
+    void extendInitStateFromProperties(SimTK::State& s) const override;
 };
 }
 

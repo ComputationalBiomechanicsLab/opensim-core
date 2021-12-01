@@ -60,6 +60,7 @@
 #include "Model/ConditionalPathPoint.h"
 #include "Model/MovingPathPoint.h"
 #include "Model/PointBasedPath.h"
+#include "Model/FunctionBasedPath.h"
 #include "Model/PrescribedForce.h"
 #include "Model/ExternalForce.h"
 #include "Model/PointToPointSpring.h"
@@ -188,7 +189,8 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( LineGeometry());
     Object::registerType( FrameGeometry());
     Object::registerType( Arrow());
-    Object::registerType( OpenSim::PointBasedPath());
+    Object::registerType( PointBasedPath());
+    Object::registerType( FunctionBasedPath());
 
     Object::registerType( ControlSet() );
     Object::registerType( ControlConstant() );
@@ -291,6 +293,7 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     // Associate an instance with old name to help deserialization.
     // This has to be done after the new Type is registered.
     Object::renameType("ActuatorSet",       "ForceSet");
+    Object::renameType("GeometryPath", "PointBasedPath");
     Object::renameType("MuscleWrap",        "PathWrap");
     Object::renameType("MuscleWrapSet",     "PathWrapSet");
     Object::renameType("MusclePoint",       "PathPoint");
@@ -306,8 +309,6 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
 
     Object::renameType("MuscleMetabolicPowerProbeUmberger2010_MetabolicMuscleParameterSet",  
         "Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameterSet");
-
-    Object::renameType("GeometryPath", "PointBasedPath");
 
   } catch (const std::exception& e) {
     std::cerr 
