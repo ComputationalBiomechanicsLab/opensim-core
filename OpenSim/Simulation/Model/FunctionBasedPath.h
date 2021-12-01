@@ -23,10 +23,40 @@ class Coordinate;
 class PointForceDirection;
 
 /**
- * An `OpenSim::GeometryPath` that uses functions to compute its state.
+ * An interface for an object that can compute the length, lengthening speed,
+ * and moment arm (w.r.t. a particular `OpenSim::Coordinate`) of a path at
+ * runtime.
+ *
+ * See `FunctionBasedPath` for a standard implementation of a `GeometryPath`
+ * that automatically handles forwarding calls to the `PathFunction`, state
+ * caching, etc.
+ */
+class PathFunction : public OpenSim::Component {
+    OpenSim_DECLARE_ABSTRACT_OBJECT(PathFunction, OpenSim::Component)
+
+public:
+    virtual ~PathFunction() noexcept = default;
+
+    virtual double getLength(const SimTK::State&) = 0;
+    virtual double getLengtheningSpeed(const SimTK::State&) = 0;
+    virtual double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) = 0;
+};
+
+/**
+ * An `OpenSim::GeometryPath` that uses `PathFunction`s to compute its state.
+ *
+ * A `FunctionBasedPath` uses an externally-provided `PathFunction` to compute the
+ * actual path, and also handles any `GeometryPath`-specific concerns, such as
+ * handling coloring and caching results.
  */
 class FunctionBasedPath final : public GeometryPath {
     OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPath, GeometryPath);
+
+    OpenSim_DECLARE_PROPERTY(PathFunction, PathFunction, "The underlying function that is used at simulation-time to evaluate the length, lengthening speed, and moment arm of the path.");
+
+    mutable CacheVariable<double> _lengthCV;
+    mutable CacheVariable<double> _speedCV;
+    mutable CacheVariable<SimTK::Vec3> _colorCV;
 
 public:
     FunctionBasedPath();
@@ -54,6 +84,8 @@ public:
 
     double computeMomentArm(const SimTK::State& s,
                             const Coordinate& aCoord) const override;
+
+    void extendAddToSystem(SimTK::MultibodySystem& system) const override;
 };
 }
 

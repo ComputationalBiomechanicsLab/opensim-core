@@ -1,5 +1,6 @@
 #include <OpenSim/Simulation/Model/FunctionBasedPath.h>
 #include <OpenSim/Simulation/Model/Model.h>
+#include <OpenSim/Simulation/SimbodyEngine/PinJoint.h>
 
 #include <chrono>
 #include <random>
@@ -209,15 +210,18 @@ OSIM_TEST(FunctionBasedPath, CanCallComputeMomentArmWithoutThrowing)
     OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{};
     model.addComponent(fbp);
 
-    OpenSim::Coordinate* coord = new OpenSim::Coordinate{};
-    model.addComponent(coord);
+    OpenSim::Body* body = new OpenSim::Body{};
+    body->setMass(1.0);
+    model.addComponent(body);
+
+    OpenSim::PinJoint* joint = new OpenSim::PinJoint{};
+    joint->connectSocket_parent_frame(model.getGround());
+    joint->connectSocket_child_frame(*body);
+    model.addJoint(joint);
 
     SimTK::State& s = model.initSystem();
 
-    SimTK::Vector_<SimTK::SpatialVec> bodyForces;
-    SimTK::Vector mobilityForces;
-
-    fbp->computeMomentArm(s, *coord);
+    fbp->computeMomentArm(s, joint->getCoordinate());
 }
 
 int main()
