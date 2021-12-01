@@ -264,7 +264,7 @@ private:
     * ModelComponent interface. ModelComponent::extendFinalizeConnections()
     * ensures that extendConnectToModel() on ModelComponent subcomponents are
     * invoked. **/
-    void extendFinalizeConnections(Component& root) override final;
+    void extendFinalizeConnections(Component& root) override;
 
     const SimTK::DefaultSystemSubsystem& getDefaultSubsystem() const;
     const SimTK::DefaultSystemSubsystem& updDefaultSubsystem();
