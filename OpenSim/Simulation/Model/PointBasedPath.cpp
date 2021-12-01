@@ -29,10 +29,7 @@
 #include <OpenSim/Simulation/Wrap/PathWrap.h>
 #include "Model.h"
 
-OpenSim::PointBasedPath::PointBasedPath() :
-    GeometryPath{},
-    _preScaleLength{0.0},
-    _maSolver{nullptr}
+OpenSim::PointBasedPath::PointBasedPath() : GeometryPath{}, _maSolver{nullptr}
 {
     setAuthors("Peter Loan");
     constructProperty_PathPointSet(PathPointSet());
@@ -242,19 +239,6 @@ void OpenSim::PointBasedPath::deletePathWrap(const SimTK::State& s, int aIndex)
     upd_PathWrapSet().remove(aIndex);
 }
 
-
-const SimTK::Vec3& OpenSim::PointBasedPath::getDefaultColor() const
-{
-    return get_Appearance().get_color();
-}
-
-void OpenSim::PointBasedPath::setDefaultColor(const SimTK::Vec3& color)
-{
-    updProperty_Appearance().setValueIsDefault(false);
-    upd_Appearance().set_color(color);
-}
-
-
 SimTK::Vec3 OpenSim::PointBasedPath::getColor(const SimTK::State& s) const
 {
     return getCacheVariableValue(s, _colorCV);
@@ -288,17 +272,6 @@ double OpenSim::PointBasedPath::getLengtheningSpeed(const SimTK::State& s) const
 void OpenSim::PointBasedPath::setLengtheningSpeed(const SimTK::State& s, double speed) const
 {
     setCacheVariableValue(s, _speedCV, speed);
-}
-
-
-double OpenSim::PointBasedPath::getPreScaleLength(const SimTK::State& s) const
-{
-    return _preScaleLength;
-}
-
-void OpenSim::PointBasedPath::setPreScaleLength(const SimTK::State& s, double length)
-{
-    _preScaleLength = length;
 }
 
 void OpenSim::PointBasedPath::getPointForceDirections(

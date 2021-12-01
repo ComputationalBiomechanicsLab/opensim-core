@@ -48,9 +48,6 @@ private:
     OpenSim_DECLARE_UNNAMED_PROPERTY(PathWrapSet,
         "The wrap objects that are associated with this path");
 
-    // used for scaling tendon and fiber lengths
-    double _preScaleLength;
-
     // Solver used to compute moment-arms. The GeometryPath owns this object,
     // but we cannot simply use a unique_ptr because we want the pointer to be
     // cleared on copy.
@@ -90,9 +87,6 @@ public:
     void moveDownPathWrap(const SimTK::State& s, int index) override;
     void deletePathWrap(const SimTK::State& s, int index) override;
 
-    const SimTK::Vec3& getDefaultColor() const override;
-    void setDefaultColor(const SimTK::Vec3& color) override;
-
     SimTK::Vec3 getColor(const SimTK::State& s) const override;
     void setColor(const SimTK::State& s, const SimTK::Vec3& color) const override;
 
@@ -101,9 +95,6 @@ public:
 
     double getLengtheningSpeed(const SimTK::State& s) const override;
     void setLengtheningSpeed(const SimTK::State& s, double speed) const override;
-
-    double getPreScaleLength(const SimTK::State& s) const override;
-    void setPreScaleLength(const SimTK::State& s, double preScaleLength) override;
 
     void getPointForceDirections(
             const SimTK::State& s,
@@ -117,12 +108,6 @@ public:
     double computeMomentArm(const SimTK::State& s,
                             const Coordinate& aCoord) const override;
     void updateGeometry(const SimTK::State& s) const override;
-
-
-
-    //--------------------------------------------------------------------------
-    // SCALING
-    //--------------------------------------------------------------------------
 
     /**
      * Calculate the path length in the current body position and store it for
