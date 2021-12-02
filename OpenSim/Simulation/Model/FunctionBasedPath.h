@@ -32,7 +32,7 @@ class PointForceDirection;
  * that automatically handles forwarding calls to the `PathFunction`, state
  * caching, etc.
  */
-class PathFunction : public OpenSim::ModelComponent {
+class OSIMSIMULATION_API PathFunction : public OpenSim::ModelComponent {
     OpenSim_DECLARE_ABSTRACT_OBJECT(PathFunction, OpenSim::Component)
 
 public:
@@ -52,7 +52,7 @@ public:
  * actual path, and also handles any `GeometryPath`-specific concerns, such as
  * handling coloring and caching results.
  */
-class FunctionBasedPath final : public GeometryPath {
+class OSIMSIMULATION_API FunctionBasedPath final : public GeometryPath {
     OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPath, GeometryPath);
 
     OpenSim_DECLARE_PROPERTY(PathFunction, PathFunction, "The underlying function that is used at simulation-time to evaluate the length, lengthening speed, and moment arm of the path.");
