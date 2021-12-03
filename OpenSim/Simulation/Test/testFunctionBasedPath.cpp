@@ -15,7 +15,7 @@ namespace {
 
     std::ostream& operator<<(std::ostream& o, Test const& t)
     {
-        return o << t.suiteName << ':' << t.name;
+        return o << t.suiteName << '/' << t.name;
     }
 
     static std::vector<Test>& GetTestList()
@@ -93,9 +93,7 @@ namespace {
         int numTimesComputeMomentArmCalled = 0;
         double computeMomentArmValue = GenerateDouble();
 
-        int numTimesGetPointForceDirectionsCalled = 0;
         int numTimesAddInEquivalentForcesCalled = 0;
-
         int numTimesExtendConnectToModelCalled = 0;
         int numTimesExtendInitStateFromPropertiesCalled = 0;
         int numTimesExtendAddToSystemCalled = 0;
@@ -126,12 +124,7 @@ namespace {
             return data->computeMomentArmValue;
         }
 
-        void getPointForceDirections(const SimTK::State& s, OpenSim::Array<OpenSim::PointForceDirection*>* rPFDs) const override
-        {
-            ++data->numTimesGetPointForceDirectionsCalled;
-        }
-
-        void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const override
+        void addInEquivalentForces(const SimTK::State&, double, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector&) const override
         {
             ++data->numTimesAddInEquivalentForcesCalled;
         }
@@ -372,68 +365,6 @@ OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedIsCached)
     SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 1);
 }
 
-OSIM_TEST(FunctionBasedPath, CanCallGetPointForceDirectionWithoutThrowing)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK::State& s = model.initSystem();
-
-    OpenSim::Array<OpenSim::PointForceDirection*> pfds;
-    fbp->getPointForceDirections(s, &pfds);  // shouldn't throw
-}
-
-OSIM_TEST(FunctionBasedPath, GetPointForceDirectionUsesPathFunctionImpl)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 0);
-
-    SimTK::State& s = model.initSystem();
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 0);
-
-    {
-        OpenSim::Array<OpenSim::PointForceDirection*> pfds;
-        fbp->getPointForceDirections(s, &pfds);
-    }
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 1);
-}
-
-OSIM_TEST(FunctionBasedPath, GetPointForceDirectionsIsNotCached)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 0);
-
-    SimTK::State& s = model.initSystem();
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 0);
-
-    {
-        OpenSim::Array<OpenSim::PointForceDirection*> pfds;
-        fbp->getPointForceDirections(s, &pfds);
-    }
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 1);
-
-    {
-        OpenSim::Array<OpenSim::PointForceDirection*> pfds;
-        fbp->getPointForceDirections(s, &pfds);  // not cached
-    }
-
-    SimTK_TEST(pathFn.data->numTimesGetPointForceDirectionsCalled == 2);
-}
-
 OSIM_TEST(FunctionBasedPath, CanCallAddInEquivalentForcesWithoutThrowing)
 {
     OpenSim::Model model;
@@ -500,7 +431,6 @@ OSIM_TEST(FunctionBasedPath, AddInEquivalentForcesIsNotCached)
 
     SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 2);
 }
-
 
 OSIM_TEST(FunctionBasedPath, CanCallComputeMomentArmWithoutThrowing)
 {
@@ -597,7 +527,6 @@ OSIM_TEST(FunctionBasedPath, PathFunctionExtendFinalizePropertiesCalledWhenFinal
     model.finalizeFromProperties();
     SimTK_TEST(pathFn.data->numTimesExtendFinalizeFromPropertiesCalled == 2);
 }
-
 
 
 // HACK: test Joris's implementation here
@@ -835,7 +764,6 @@ namespace joris {
         double getLength(const SimTK::State&) const override;
         double getLengtheningSpeed(const SimTK::State&) const override;
         double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const override;
-        void getPointForceDirections(const SimTK::State& s, OpenSim::Array<PointForceDirection*>* rPFDs) const override;
         void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const override;
         void extendFinalizeFromProperties() override;
         void extendFinalizeConnections(OpenSim::Component&) override;
@@ -1448,12 +1376,7 @@ namespace joris {
         return Impl_GetPathLengthDerivative(*this, s, aCoord);
     }
 
-    void JorisFBP::getPointForceDirections(const SimTK::State& s, OpenSim::Array<PointForceDirection*>* rPFDs) const
-    {
-        OPENSIM_THROW(Exception, "Tried to call `getPointForceDirections` on a `JorisFBP`. You cannot call this method on a `GeometryPath` that is a `FunctionBasedPath` (it isn't path-based). Either remove this function call or replace the `FunctionBasedPath` with a `PointBasedPath` in the model");
-    }
-
-    void JorisFBP::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const
+    void JorisFBP::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector& mobilityForces) const
     {
         const SimTK::SimbodyMatterSubsystem& matter = getModel().getMatterSubsystem();
 

@@ -154,18 +154,6 @@ public:
     virtual double getLengtheningSpeed(const SimTK::State& s) const = 0;
 
     /**
-     * Appends PointForceDirections to the output parameter.
-     *
-     * These can be used to apply tension to bodies the points are connected to.
-     *
-     * CAUTION: the return pointers are heap allocated: you must delete them yourself!
-     */
-    DEPRECATED_14("Avoid using GeometryPath::getPointForceDirections(...): prefer GeometryPath::addInEquivalentForces(...) instead.")
-    virtual void getPointForceDirections(
-            const SimTK::State& s,
-            OpenSim::Array<PointForceDirection*>* rPFDs) const = 0;
-
-    /**
      *  Add in the equivalent body and generalized forces to be applied to the
      *  multibody system resulting from a tension along the GeometryPath.
      *
@@ -354,6 +342,18 @@ public:
 
     DEPRECATED_14("Avoid using GeometryPath::setLengtheningSpeed(...): it shouldn't be possible to externally set the lengthening speed of a (potentially, computed) path.")
     virtual void setLengtheningSpeed(const SimTK::State& s, double speed) const;
+
+    /**
+     * Appends PointForceDirections to the output parameter.
+     *
+     * These can be used to apply tension to bodies the points are connected to.
+     *
+     * CAUTION: the return pointers are heap allocated: you must delete them yourself!
+     */
+    DEPRECATED_14("Avoid using GeometryPath::getPointForceDirections(...): prefer GeometryPath::addInEquivalentForces(...) instead.")
+    virtual void getPointForceDirections(
+            const SimTK::State& s,
+            OpenSim::Array<PointForceDirection*>* rPFDs) const;
 
     /**
      * Proactively updates any decorative geometry attached to the path.

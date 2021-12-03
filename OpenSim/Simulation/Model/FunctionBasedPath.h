@@ -41,7 +41,6 @@ public:
     virtual double getLength(const SimTK::State&) const = 0;
     virtual double getLengtheningSpeed(const SimTK::State&) const = 0;
     virtual double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const = 0;
-    virtual void getPointForceDirections(const SimTK::State& s, OpenSim::Array<PointForceDirection*>* rPFDs) const = 0;
     virtual void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const = 0;
 };
 
@@ -76,10 +75,6 @@ public:
 
     double getLength(const SimTK::State& s) const override;
     double getLengtheningSpeed(const SimTK::State& s) const override;
-
-    void getPointForceDirections(
-            const SimTK::State& s,
-            OpenSim::Array<PointForceDirection*>* rPFDs) const override;
 
     void addInEquivalentForces(const SimTK::State& state,
                                double tension,

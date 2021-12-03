@@ -159,24 +159,30 @@ static bool emitDeprecationWarning(char const* funcName)
     return true;
 }
 
+#define SHOW_FUNC_DEPRECATION_WARNING() \
+    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);  \
+    (void)g_ShownDeprecationWarning;
+
 const OpenSim::PathPointSet& OpenSim::GeometryPath::getPathPointSet() const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return _impl->getOrUpdPPSCached();
 }
 
 OpenSim::PathPointSet& OpenSim::GeometryPath::updPathPointSet()
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return _impl->getOrUpdPPSCached();
 }
 
 OpenSim::AbstractPathPoint* OpenSim::GeometryPath::addPathPoint(
-        const SimTK::State& s,
-        int index,
-        const PhysicalFrame& frame)
+        const SimTK::State&,
+        int,
+        const PhysicalFrame&)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
 
     // don't actually add the path point, just return a dummy path point to
     // ensure downstream code reliant on the deprecated API doesn't explode
@@ -185,11 +191,11 @@ OpenSim::AbstractPathPoint* OpenSim::GeometryPath::addPathPoint(
 }
 
 OpenSim::AbstractPathPoint* OpenSim::GeometryPath::appendNewPathPoint(
-        const std::string& proposedName,
-        const PhysicalFrame& frame,
-        const SimTK::Vec3& locationOnFrame)
+        const std::string&,
+        const PhysicalFrame&,
+        const SimTK::Vec3&)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
 
     // don't actually add the path point, just return a dummy path point to
     // ensure downstream code reliant on the deprecated API doesn't explode
@@ -197,83 +203,105 @@ OpenSim::AbstractPathPoint* OpenSim::GeometryPath::appendNewPathPoint(
     return _impl->getOrUpdFixupPathPointCached();
 }
 
-bool OpenSim::GeometryPath::canDeletePathPoint(int index)
+bool OpenSim::GeometryPath::canDeletePathPoint(int)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return false;
 }
 
-bool OpenSim::GeometryPath::deletePathPoint(const SimTK::State& s, int index)
+bool OpenSim::GeometryPath::deletePathPoint(const SimTK::State&, int)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return false;
 }
 
 bool OpenSim::GeometryPath::replacePathPoint(
-        const SimTK::State& s,
-        AbstractPathPoint* oldPathPoint,
-        AbstractPathPoint* newPathPoint)
+        const SimTK::State&,
+        AbstractPathPoint*,
+        AbstractPathPoint*)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return false;
 }
 
-const OpenSim::Array<OpenSim::AbstractPathPoint*>& OpenSim::GeometryPath::getCurrentPath(const SimTK::State& s) const
+const OpenSim::Array<OpenSim::AbstractPathPoint*>& OpenSim::GeometryPath::getCurrentPath(const SimTK::State&) const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return _impl->getOrUpdCurrentPathArray();
 }
 
 const OpenSim::PathWrapSet& OpenSim::GeometryPath::getWrapSet() const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return _impl->getOrUpdPathWrapSet();
 }
 
 OpenSim::PathWrapSet& OpenSim::GeometryPath::updWrapSet()
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return _impl->getOrUpdPathWrapSet();
 }
 
-void OpenSim::GeometryPath::addPathWrap(WrapObject &aWrapObject)
+void OpenSim::GeometryPath::addPathWrap(WrapObject&)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::moveUpPathWrap(const SimTK::State& s, int index)
+void OpenSim::GeometryPath::moveUpPathWrap(const SimTK::State&, int)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::moveDownPathWrap(const SimTK::State& s, int index)
+void OpenSim::GeometryPath::moveDownPathWrap(const SimTK::State&, int)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::deletePathWrap(const SimTK::State& s, int index)
+void OpenSim::GeometryPath::deletePathWrap(const SimTK::State&, int)
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::setLength(const SimTK::State& s, double length) const
+void OpenSim::GeometryPath::setLength(const SimTK::State&, double) const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::setLengtheningSpeed(const SimTK::State& s, double speed) const
+void OpenSim::GeometryPath::setLengtheningSpeed(const SimTK::State&, double) const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }
 
-void OpenSim::GeometryPath::updateGeometry(const SimTK::State& s) const
+void OpenSim::GeometryPath::getPointForceDirections(
+        const SimTK::State&,
+        OpenSim::Array<PointForceDirection*>*) const
 {
-    static const bool g_ShownDeprecationWarning = emitDeprecationWarning(__func__);
+    SHOW_FUNC_DEPRECATION_WARNING();
+
+    return;
+}
+
+void OpenSim::GeometryPath::updateGeometry(const SimTK::State&) const
+{
+    SHOW_FUNC_DEPRECATION_WARNING();
+
     return;
 }

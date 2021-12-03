@@ -30,12 +30,7 @@ namespace {
             OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
         }
 
-        void getPointForceDirections(const SimTK::State& s, OpenSim::Array<OpenSim::PointForceDirection*>* rPFDs) const override
-        {
-            OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
-        }
-
-        void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const override
+        void addInEquivalentForces(const SimTK::State&, double, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector&) const override
         {
             OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
         }
@@ -92,11 +87,6 @@ double OpenSim::FunctionBasedPath::getLengtheningSpeed(const SimTK::State& s) co
     double v = getProperty_PathFunction().getValue().getLengtheningSpeed(s);
     setCacheVariableValue(s, _speedCV, v);
     return v;
-}
-
-void OpenSim::FunctionBasedPath::getPointForceDirections(const SimTK::State& s, OpenSim::Array<PointForceDirection*>* rPFDs) const
-{
-    getProperty_PathFunction().getValue().getPointForceDirections(s, rPFDs);
 }
 
 void OpenSim::FunctionBasedPath::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const
