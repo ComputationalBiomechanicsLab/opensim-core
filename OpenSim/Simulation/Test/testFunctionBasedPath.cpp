@@ -1,5 +1,7 @@
 #include <OpenSim/Simulation/Model/FunctionBasedPath.h>
 
+#include <OpenSim/Auxiliary/auxiliaryTestFunctions.h>
+#include <OpenSim/Common/Function.h>
 #include <OpenSim/Simulation/Model/Model.h>
 #include <OpenSim/Simulation/SimbodyEngine/PinJoint.h>
 
@@ -8,8 +10,9 @@
 #include <stdexcept>
 #include <vector>
 
-// this is a poor-man's GoogleTest, but I still prefer it to the madness of
-// having a massive `main()` containing many `try..catch` blocks
+// test support code
+//
+// enables the OSIM_TEST macro, and other nice-to-haves
 namespace {
     struct Test { char const* suiteName; char const* name; void(*testFunc)(void); };
 
@@ -83,109 +86,179 @@ namespace {
         return SimTK::Vec3{GenerateDouble(), GenerateDouble(), GenerateDouble()};
     }
 
-    struct MockPathFunctionData {
-        int numTimesGetLengthCalled = 0;
-        double lengthValue = GenerateDouble();
+    static std::vector<std::string> GenerateNPrefixedStrings(int n, std::string prefix = "str")
+    {
+        std::vector<std::string> rv;
+        for (int i = 0; i < n; ++i) {
+            std::stringstream ss;
+            ss << prefix << i;
+            rv.push_back(ss.str());
+        }
+        return rv;
+    }
+}
 
-        int numTimesLengtheningSpeedCalled = 0;
-        double lengtheningSpeedValue = GenerateDouble();
+// FunctionBasedPath test support code
+//
+// enables mocking functions, etc.
+namespace {
+    template<typename T>
+    std::vector<T> ToStdVector(const SimTK::Array_<T>& stkArray)
+    {
+        std::vector<T> rv;
+        rv.reserve(stkArray.size());
+        for (const T& v : stkArray) {
+            rv.push_back(v);
+        }
+        return rv;
+    }
 
-        int numTimesComputeMomentArmCalled = 0;
-        double computeMomentArmValue = GenerateDouble();
+    template<typename T>
+    std::vector<T> ToStdVector(const SimTK::Vector_<T>& stkVec)
+    {
+        std::vector<T> rv;
+        rv.reserve(stkVec.size());
+        for (int i = 0; i < stkVec.size(); ++i) {
+            rv.push_back(stkVec[i]);
+        }
+        return rv;
+    }
 
-        int numTimesAddInEquivalentForcesCalled = 0;
-        int numTimesExtendConnectToModelCalled = 0;
-        int numTimesExtendInitStateFromPropertiesCalled = 0;
-        int numTimesExtendAddToSystemCalled = 0;
-        int numTimesExtendFinalizeFromPropertiesCalled = 0;
+    struct SharedFunctionData final {
+        double value = 0.0;
+        double derivative = 0.0;
+        int argumentSize = 0;
+        int maxDerivativeOrder = 1;  // these functions must be differentiable at least once
+        std::vector<double> lastCalcValueArg = {};
+        std::vector<int> lastCalcDerivativeIntArg = {};
+        std::vector<double> lastCalcDerivativeValArgs = {};
+
+        int numTimesCalcValueCalled = 0;
+        int numTimesCalcDerivativeCalled = 0;
+        int numTimesGetArgumentSizeCalled = 0;
+        int numTimesGetMaxDerivativeOrderCalled = 0;
+    };
+
+    class MockSimTKFunction final : public SimTK::Function {
+    public:
+        mutable std::shared_ptr<SharedFunctionData> m_SharedData;
+
+        MockSimTKFunction(std::shared_ptr<SharedFunctionData> sharedData) :
+            m_SharedData{sharedData}
+        {
+        }
+
+        double calcValue(const SimTK::Vector& args) const override
+        {
+            ++m_SharedData->numTimesCalcValueCalled;
+            m_SharedData->lastCalcValueArg = ToStdVector(args);
+            return m_SharedData->value;
+        }
+
+        double calcDerivative(const SimTK::Array_<int>& intArg, const SimTK::Vector& valArgs) const override
+        {
+            ++m_SharedData->numTimesCalcDerivativeCalled;
+            m_SharedData->lastCalcDerivativeIntArg = ToStdVector(intArg);
+            m_SharedData->lastCalcDerivativeValArgs = ToStdVector(valArgs);
+            return m_SharedData->derivative;
+        }
+
+        int getArgumentSize() const override
+        {
+            ++m_SharedData->numTimesGetArgumentSizeCalled;
+            return m_SharedData->argumentSize;
+        }
+
+        int getMaxDerivativeOrder() const override
+        {
+            ++m_SharedData->numTimesGetMaxDerivativeOrderCalled;
+            return m_SharedData->maxDerivativeOrder;
+        }
+
+        SimTK::Function* clone() const override
+        {
+            return new MockSimTKFunction{*this};
+        }
     };
 
     // used to test that the FunctionBasedPath is forwarding things correctly
-    class MockPathFunction : public OpenSim::PathFunction {
-        OpenSim_DECLARE_CONCRETE_OBJECT(MockPathFunction, OpenSim::PathFunction);
+    class MockPathFunction : public OpenSim::Function {
+        OpenSim_DECLARE_CONCRETE_OBJECT(MockPathFunction, OpenSim::Function);
+
     public:
-        mutable std::shared_ptr<MockPathFunctionData> data = std::make_shared<MockPathFunctionData>();
+        mutable std::shared_ptr<SharedFunctionData> m_SharedData = std::make_shared<SharedFunctionData>();
 
-        double getLength(const SimTK::State&) const override
+        double calcValue(const SimTK::Vector& args) const override
         {
-            ++data->numTimesGetLengthCalled;
-            return data->lengthValue;
+            ++m_SharedData->numTimesCalcValueCalled;
+            m_SharedData->lastCalcValueArg = ToStdVector(args);
+            return m_SharedData->value;
         }
 
-        double getLengtheningSpeed(const SimTK::State&) const override
+        double calcDerivative(const std::vector<int>& intArgs, const SimTK::Vector& valArgs) const override
         {
-            ++data->numTimesLengtheningSpeedCalled;
-            return data->lengtheningSpeedValue;
+            ++m_SharedData->numTimesCalcDerivativeCalled;
+            m_SharedData->lastCalcDerivativeIntArg = intArgs;
+            m_SharedData->lastCalcDerivativeValArgs = ToStdVector(valArgs);
+            return m_SharedData->derivative;
         }
 
-        double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const override
+        int getArgumentSize() const override
         {
-            ++data->numTimesComputeMomentArmCalled;
-            return data->computeMomentArmValue;
+            ++m_SharedData->numTimesGetArgumentSizeCalled;
+            return m_SharedData->argumentSize;
         }
 
-        void addInEquivalentForces(const SimTK::State&, double, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector&) const override
+        int getMaxDerivativeOrder() const override
         {
-            ++data->numTimesAddInEquivalentForcesCalled;
+            ++m_SharedData->numTimesGetMaxDerivativeOrderCalled;
+            return m_SharedData->maxDerivativeOrder;
         }
 
-        // these are redundantly checked (the Component/Property tests *should*
-        // also test these) because existing implementations do use these methods
-        // to hook into the model/system/state at various steps (e.g. to cache
-        // coordinates, or whatever they need) and it's handy to redundantly
-        // ensure these are hooked up to the PathFunction via the FunctionBasedPath
-        // correctly.
-
-        void extendConnectToModel(OpenSim::Model&) override
+        SimTK::Function* createSimTKFunction() const override
         {
-            ++data->numTimesExtendConnectToModelCalled;
-        }
-
-        void extendInitStateFromProperties(SimTK::State&) const override
-        {
-            ++data->numTimesExtendInitStateFromPropertiesCalled;
-        }
-
-        void extendAddToSystem(SimTK::MultibodySystem&) const override
-        {
-            ++data->numTimesExtendAddToSystemCalled;
-        }
-
-        void extendFinalizeFromProperties() override
-        {
-            ++data->numTimesExtendFinalizeFromPropertiesCalled;
+            return new MockSimTKFunction{m_SharedData};
         }
     };
+
+    // helper struct for generating a model with N coordinates
+    struct ModelWithNCoordinates {
+        OpenSim::Model model;
+        std::vector<std::string> coordinateAbsPaths;
+    };
+
+    ModelWithNCoordinates GenerateModelWithNCoordinates(int n)
+    {
+        ModelWithNCoordinates rv;
+
+        for (int i = 0; i < n; ++i) {
+            // create a dummy body the joint is joining to ground
+            OpenSim::Body* body = new OpenSim::Body{};
+            body->setName(std::string{"body_"} + std::to_string(i));
+            body->setMass(1.0);
+            rv.model.addBody(body);
+
+            // create the joint and connect it to the body + ground
+            OpenSim::PinJoint* joint = new OpenSim::PinJoint{};
+            joint->setName(std::string{"pinjoint_"} + std::to_string(i));
+            joint->connectSocket_parent_frame(rv.model.getGround());
+            joint->connectSocket_child_frame(*body);
+            rv.model.addComponent(joint);
+
+            // save the coordinate's path (used by the FBP API)
+            rv.coordinateAbsPaths.push_back(joint->getCoordinate().getAbsolutePathString());
+        }
+
+        return rv;
+    }
 }
 
+
+// construction tests
 
 OSIM_TEST(FunctionBasedPath, CanBeDefaultConstructedWithoutThrowing)
 {
     OpenSim::FunctionBasedPath fbp;  // shouldn't throw
-}
-
-OSIM_TEST(FunctionBasedPath, CanBeConstructedWithAPathFunction)
-{
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath fbp{pathFn};
-}
-
-OSIM_TEST(FunctionBasedPath, WhenConstructedWithPathFunctionUsesTheFunctionInLengthEvaluation)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
-
-    SimTK::State& s = model.initSystem();
-
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
-
-    SimTK_TEST(fbp->getLength(s) == pathFn.data->lengthValue);
-
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 1);
 }
 
 OSIM_TEST(FunctionBasedPath, CanBeCopyConstructedWithoutThrowing)
@@ -197,8 +270,110 @@ OSIM_TEST(FunctionBasedPath, CanBeCopyConstructedWithoutThrowing)
 OSIM_TEST(FunctionBasedPath, CanBeMoveConstructedWithoutThrowing)
 {
     OpenSim::FunctionBasedPath fbp1;
-    OpenSim::FunctionBasedPath fbp2{std::move(fbp1)};
+    OpenSim::FunctionBasedPath fbp2{std::move(fbp1)};  // shouldn't throw
 }
+
+OSIM_TEST(FunctionBasedPath, CanBeConstructedWithA0ArgPathFunctionAndEmptyCoordinateListWithoutThrowing)
+{
+    MockPathFunction pathFn;
+    std::vector<std::string> coords;
+    OpenSim::FunctionBasedPath fbp{pathFn, coords};  // shouldn't throw
+}
+
+OSIM_TEST(FunctionBasedPath, CanBeConstructedWithAnNArityFunctionAndNCoordinates)
+{
+    // function-based paths have to support being parameterized with a varying
+    // number of coordinates - not just 0, 1, or 2 (etc.)
+
+    for (int i = 0; i < 10; ++i) {
+        MockPathFunction fn;
+        fn.m_SharedData->argumentSize = i;
+        std::vector<std::string> coords = GenerateNPrefixedStrings(i);
+
+        OpenSim::FunctionBasedPath fbp{fn, coords};  // shouldn't throw
+    }
+}
+
+OSIM_TEST(FunctionBasedPath, ConstructingWithDifferentArityAndNumberOfCoordinatesThrows)
+{
+    // the arity (number of arguments) the function accepts should be equal to the
+    // number of coordinates the caller specifies
+    //
+    // this is because, at simulation time, the FunctionBasedPath pumps the coordinate
+    // values into the function as arguments. Effectively, the generic function is
+    // parameterized by coordinate values.
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 3;
+    std::vector<std::string> coords = { "onlyone" };
+
+    ASSERT_THROW(OpenSim::Exception, OpenSim::FunctionBasedPath fbp(fn, coords));
+}
+
+OSIM_TEST(FunctionBasedPath, ConstructingWithAFunctionThatHasNoDerivativeThrows)
+{
+    // the provided function must be differentiable
+    //
+    // this is because the function needs to provide 0-order results (i.e. the
+    // length of the path) and 1st-order results (i.e. the lengthening speed of
+    // the path)
+
+    MockPathFunction fn;
+    fn.m_SharedData->maxDerivativeOrder = 0;  // non-differentiable function
+
+    ASSERT_THROW(OpenSim::Exception, OpenSim::FunctionBasedPath fbp(fn, {}));
+}
+
+OSIM_TEST(FunctionBasedPath, ConstructingWithAnEmptyCoordNameThrows)
+{
+    // the provided coordinate names should be non-empty
+    //
+    // this is a sanity-check by the implementation. It's entirely feasible
+    // that some external process (e.g. a file reader) pumps a blank line
+    // or whitespace string into this object's constructor - we try to
+    // aggressively find + report it early, rather than during some later
+    // runtime lookup
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 1;
+
+    ASSERT_THROW(OpenSim::Exception, OpenSim::FunctionBasedPath fbp(fn, {""}));
+}
+
+OSIM_TEST(FunctionBasedPath, WhenConstructedWithPathFunctionUsesTheFunctionInLengthEvaluation)
+{
+    // this is partially an implementation detail - you can remove this test if you need
+    //
+    // the test is providing a 0-arity, 0-coordinate function to the path, but this
+    // test is ensuring that this (to be fair, bizzare) edge-case still ends up
+    // calling `getLength` with 0 args and ultimately returns some value
+    //
+    // see later API tests for how `getLength` etc. *should* be used: this is
+    // mostly just a sanity check on the "construct with a function" pattern that
+    // the test suite uses (prod uses are likely to just set property values on
+    // loading an OSIM file or something)
+
+    OpenSim::Model model;
+
+    MockPathFunction pathFn;
+    std::vector<std::string> coords;
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn, coords};
+
+    model.addComponent(fbp);
+
+    SimTK_TEST(pathFn.m_SharedData->numTimesCalcValueCalled == 0);
+
+    SimTK::State& s = model.initSystem();
+
+    SimTK_TEST(pathFn.m_SharedData->numTimesCalcValueCalled == 0);
+
+    SimTK_TEST(fbp->getLength(s) == pathFn.m_SharedData->value);
+
+    SimTK_TEST(pathFn.m_SharedData->numTimesCalcValueCalled == 1);
+}
+
+
+// assignment tests
 
 OSIM_TEST(FunctionBasedPath, CanBeCopyAssignedWithoutThrowing)
 {
@@ -214,10 +389,132 @@ OSIM_TEST(FunctionBasedPath, CanBeMoveAssignedWithoutThrowing)
     fbp2 = std::move(fbp1);
 }
 
+
+// api tests
+
+OSIM_TEST(FunctionBasedPath, FinalizeFromPropertiesWithoutSettingFunctionThrows)
+{
+    // calling finalizeFromProperties implies the FBP's properties are correct
+    //
+    // it is incorrect to leave the Function property not-set
+
+    OpenSim::FunctionBasedPath fbp;
+
+    ASSERT_THROW(OpenSim::Exception, fbp.finalizeFromProperties());
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeFromPropertiesWithNonDifferentiableFunctionThrows)
+{
+    // calling finalizeFromProperties implies the FBP's properties are correct
+    //
+    // it is incorrect to set the Function property to a function that cannot
+    // be differentiated (an API requirement)
+
+    OpenSim::FunctionBasedPath fbp;
+
+    MockPathFunction fn;
+    fn.m_SharedData->maxDerivativeOrder = 0;  // non-differentiable
+
+    auto& prop = dynamic_cast<OpenSim::Property<OpenSim::Function>&>(fbp.updPropertyByName("PathFunction"));
+    prop.setValue(fn);
+
+    ASSERT_THROW(OpenSim::Exception, fbp.finalizeFromProperties());
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeFromPropertiesWithInvalidFunctionArityThrows)
+{
+    // calling finalizeFromProperties implies the FBP's properties are correct
+    //
+    // it is incorrect to set the Function property to a function that has a
+    // different arity (number of arguments) from the number of coordinates
+    // defined in the coordinates property
+
+    OpenSim::FunctionBasedPath fbp;
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 10;
+
+    auto& prop = dynamic_cast<OpenSim::Property<OpenSim::Function>&>(fbp.updPropertyByName("PathFunction"));
+    prop.setValue(fn);
+
+    ASSERT_THROW(OpenSim::Exception, fbp.finalizeFromProperties());
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeFromPropertiesWithEmptyCoordinateStringThrows)
+{
+    // calling finalizeFromProperties implies the FBP's properties are correct
+    //
+    // it is incorrect to provide an empty coordinate string as a property (every
+    // string should be a nonempty absolute path to a coordinate)
+
+    OpenSim::FunctionBasedPath fbp;
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 1;
+    auto& funcProp = dynamic_cast<OpenSim::Property<OpenSim::Function>&>(fbp.updPropertyByName("PathFunction"));
+    funcProp.setValue(fn);
+
+    auto& coordProp = dynamic_cast<OpenSim::Property<std::string>&>(fbp.updPropertyByName("Coordinates"));
+    coordProp.adoptAndAppendValue(new std::string{""});
+
+    ASSERT_THROW(OpenSim::Exception, fbp.finalizeFromProperties());
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeFromPropertiesWithCorrectPropertiesDoesNotThrow)
+{
+    // this is a throwaway test that ensures the sane-case doesn't throw
+
+    OpenSim::FunctionBasedPath fbp;
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 0;
+    auto& funcProp = dynamic_cast<OpenSim::Property<OpenSim::Function>&>(fbp.updPropertyByName("PathFunction"));
+    funcProp.setValue(fn);
+
+    fbp.finalizeFromProperties();  // shouldn't throw
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeConnectionsWithCorrectPropertiesDoesNotThrow)
+{
+    // calling `finalizeConnections` should be fine if every coordinate path
+    // provided to the FBP constructor is actually a real coordinate
+
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());
+
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
+
+    m.model.finalizeFromProperties();
+    m.model.finalizeConnections();
+}
+
+OSIM_TEST(FunctionBasedPath, FinalizeConnectionsWithIncorrectCoordinatePathThrows)
+{
+    // calling `finalizeConnections` should throw with a (hopefully) handy error
+    // message at conneciton-time if an FBP contains an invalid coordinate path
+
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());
+
+    auto paths = m.coordinateAbsPaths;
+    paths[2] = "not-a-real-coordinate-path";
+
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, paths};
+    m.model.addComponent(fbp);
+
+    m.model.finalizeFromProperties();
+    ASSERT_THROW(OpenSim::Exception, m.model.finalizeConnections());
+}
+
 OSIM_TEST(FunctionBasedPath, CanGetColorWithoutThrowing)
 {
     OpenSim::Model model;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{};
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{MockPathFunction{}, {}};
     model.addComponent(fbp);
 
     SimTK::State& s = model.initSystem();
@@ -230,7 +527,7 @@ OSIM_TEST(FunctionBasedPath, GetColorReturnsDefaultColorIfSetColorIsNotCalled)
     SimTK::Vec3 randomColor = GenerateRandomVector();
 
     OpenSim::Model model;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{};
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{MockPathFunction{}, {}};
     fbp->setDefaultColor(randomColor);
     model.addComponent(fbp);
 
@@ -244,7 +541,7 @@ OSIM_TEST(FunctionBasedPath, SetColorSetsTheColorInTheState)
     SimTK::Vec3 randomColor = GenerateRandomVector();
 
     OpenSim::Model model;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{};
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{MockPathFunction{}, {}};
     fbp->setDefaultColor(randomColor);
     model.addComponent(fbp);
 
@@ -255,279 +552,204 @@ OSIM_TEST(FunctionBasedPath, SetColorSetsTheColorInTheState)
     SimTK_TEST(fbp->getColor(s) == randomColor);
 }
 
-OSIM_TEST(FunctionBasedPath, CanCallGetLengthWithoutThrowing)
+OSIM_TEST(FunctionBasedPath, GetLengthUsesUnderlyingFunctionCalcValue)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // the FunctionBasedPath ultimately gets its result values from the underlying
+    // Function object, rather than generating them itself
 
-    SimTK::State& s = model.initSystem();
-    model.realizePosition(s);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(1);
+    OpenSim::Coordinate const& coord = m.model.getComponent<OpenSim::Coordinate>(m.coordinateAbsPaths.at(0));
 
-    fbp->getLength(s);  // shouldn't throw
-}
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 1;
+    std::vector<std::string> coordPaths = {coord.getAbsolutePathString()};
 
-OSIM_TEST(FunctionBasedPath, GetLengthUsesPathFunctionImpl)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, coordPaths};
+    m.model.addComponent(fbp);
 
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 0);
 
-    SimTK::State& s = model.initSystem();
-    model.realizePosition(s);
+    SimTK::State& s = m.model.initSystem();
 
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
-
-    SimTK_TEST(fbp->getLength(s) == pathFn.data->lengthValue);
-
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 1);
+    SimTK_TEST(fbp->getLength(s) == fn.m_SharedData->value);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 1);
+    SimTK_TEST(fn.m_SharedData->lastCalcValueArg.size() == 1);
+    SimTK_TEST(fn.m_SharedData->lastCalcValueArg == std::vector<double>{coord.getValue(s)});
 }
 
 OSIM_TEST(FunctionBasedPath, GetLengthIsCached)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // FunctionBasedPath::getLength should be "cached" depending on the simulation
+    // stage.
+    //
+    // this is an implementation detail that's good for implementors to know. Remove
+    // this test if it's a bad assumption.
 
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(1);
 
-    SimTK::State& s = model.initSystem();
-    model.realizePosition(s);
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
 
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 0);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 0);
 
-    SimTK_TEST(fbp->getLength(s) == pathFn.data->lengthValue);
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizePosition(s);
 
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 1);
-
-    SimTK_TEST(fbp->getLength(s) == pathFn.data->lengthValue);  // should cache
-
-    SimTK_TEST(pathFn.data->numTimesGetLengthCalled == 1);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 0);
+    SimTK_TEST(fbp->getLength(s) == fn.m_SharedData->value);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 1);
+    fbp->getLength(s);  // should cache
+    SimTK_TEST(fn.m_SharedData->numTimesCalcValueCalled == 1);
 }
 
-OSIM_TEST(FunctionBasedPath, CanCallGetLengtheningSpeedWithoutThrowing)
+OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedUsesUnderlyingFunctionCalcValue)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // the FunctionBasedPath ultimately calculates its lengthening speed
+    // by using the underlying Function object, rather than computing it
+    // itself
 
-    SimTK::State& s = model.initSystem();
-    model.realizeAcceleration(s);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(1);
 
-    fbp->getLengtheningSpeed(s);  // shouldn't throw
-}
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
 
-OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedUsesPathFunctionImpl)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 0);
 
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 0);
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
 
-    SimTK::State& s = model.initSystem();
-    model.realizeAcceleration(s);
+    double lengtheningSpeed = fbp->getLengtheningSpeed(s);
 
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 0);
-
-    SimTK_TEST(fbp->getLengtheningSpeed(s) == pathFn.data->lengtheningSpeedValue);
-
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 1);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 1);
+    SimTK_TEST(lengtheningSpeed == fn.m_SharedData->derivative);
+    SimTK_TEST(fn.m_SharedData->lastCalcDerivativeIntArg == std::vector<int>{0});
 }
 
 OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedIsCached)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // the FunctionBasedPath ultimately calculates its lengthening speed
+    // by using the underlying Function object, rather than computing it
+    // itself
 
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 0);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(1);
 
-    SimTK::State& s = model.initSystem();
-    model.realizeAcceleration(s);
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
 
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 0);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 0);
 
-    SimTK_TEST(fbp->getLengtheningSpeed(s) == pathFn.data->lengtheningSpeedValue);
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
 
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 1);
-
-    SimTK_TEST(fbp->getLengtheningSpeed(s) == pathFn.data->lengtheningSpeedValue);  // should cache
-
-    SimTK_TEST(pathFn.data->numTimesLengtheningSpeedCalled == 1);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 0);
+    SimTK_TEST(fbp->getLengtheningSpeed(s) == fn.m_SharedData->value);
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 1);
+    fbp->getLengtheningSpeed(s);  // should cache
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 1);
 }
 
-OSIM_TEST(FunctionBasedPath, CanCallAddInEquivalentForcesWithoutThrowing)
+OSIM_TEST(FunctionBasedPath, AddInEquivalentForcesOnValidFBPDoesNotThrow)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // calling `addInEquivalentForces` on a fully-initialized function-based
+    // path shouldn't throw, and should probably add *something* to the mobility
+    // forces outparam
 
-    SimTK::State& s = model.initSystem();
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = static_cast<int>(m.coordinateAbsPaths.size());  // all coords affect this path
 
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
+
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
+
+    double tension = 5.0;
     SimTK::Vector_<SimTK::SpatialVec> bodyForces;
     SimTK::Vector mobilityForces;
+    mobilityForces.resize(100); // required because impl doesn't actually add entries (no range checking) it's assigning a force per body index or something
 
-    fbp->addInEquivalentForces(s, 1.0, bodyForces, mobilityForces);
+    fbp->addInEquivalentForces(s, tension, bodyForces, mobilityForces);  // shouldn't throw
 }
 
-OSIM_TEST(FunctionBasedPath, AddInEquivalentForcesUsesPathFunctionImpl)
+OSIM_TEST(FunctionBasedPath, AddInEquivalentForcesOnEmptyCoordlistWorks)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // edge-case: you can still add in equivalent forces (i.e. nothing) when
+    // using an FBP that isn't parameterized by any Coordinates
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 0);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 0;  // no coords affect this path
 
-    SimTK::State& s = model.initSystem();
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, {}};
+    m.model.addComponent(fbp);
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 0);
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
 
-    {
-        SimTK::Vector_<SimTK::SpatialVec> bodyForces;
-        SimTK::Vector mobilityForces;
-        fbp->addInEquivalentForces(s, 1.0, bodyForces, mobilityForces);
-    }
+    double tension = 5.0;
+    SimTK::Vector_<SimTK::SpatialVec> bodyForces;
+    SimTK::Vector mobilityForces;
+    mobilityForces.resize(100); // required because impl doesn't actually add entries (no range checking) it's assigning a force per body index or something
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 1);
+    fbp->addInEquivalentForces(s, tension, bodyForces, mobilityForces);  // shouldn't throw
 }
 
-OSIM_TEST(FunctionBasedPath, AddInEquivalentForcesIsNotCached)
+OSIM_TEST(FunctionBasedPath, ComputeMomentArmReturns0IfCalledWithNonAffectingCoord)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // `computeMomentArm` may be called with a coordinate that does not actually
+    // affect the given FBP
+    //
+    // in that case, the returned moment arm shall always be 0.0
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 0);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+    MockPathFunction fn;
+    fn.m_SharedData->argumentSize = 4;  // the first 4 coords affect the path
 
-    SimTK::State& s = model.initSystem();
+    auto affectingCoords = m.coordinateAbsPaths;
+    affectingCoords.resize(affectingCoords.size()-1);
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, affectingCoords};
+    m.model.addComponent(fbp);
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 0);
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
 
-    {
-        SimTK::Vector_<SimTK::SpatialVec> bodyForces;
-        SimTK::Vector mobilityForces;
-        fbp->addInEquivalentForces(s, 1.0, bodyForces, mobilityForces);
-    }
+    const auto& nonAffectingCoord = m.model.getComponent<OpenSim::Coordinate>(m.coordinateAbsPaths.back());
 
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 1);
-
-    {
-        SimTK::Vector_<SimTK::SpatialVec> bodyForces;
-        SimTK::Vector mobilityForces;
-        fbp->addInEquivalentForces(s, 1.0, bodyForces, mobilityForces);
-    }
-
-    SimTK_TEST(pathFn.data->numTimesAddInEquivalentForcesCalled == 2);
+    SimTK_TEST(fbp->computeMomentArm(s, nonAffectingCoord) == 0);
 }
 
-OSIM_TEST(FunctionBasedPath, CanCallComputeMomentArmWithoutThrowing)
+OSIM_TEST(FunctionBasedPath, ComputeMomentArmCallsCalcDerivOfFunction)
 {
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
+    // this is an implementation detail - remove this test if the detail becomes non-true
+    //
+    // computing a moment arm should use the path's derivative to compute the
+    // moment arm. This test just tries to ensure that that's what's happening,
+    // as a sanity-check on the underlying plumbing
 
-    OpenSim::Body* body = new OpenSim::Body{};
-    body->setMass(1.0);
-    model.addComponent(body);
+    ModelWithNCoordinates m = GenerateModelWithNCoordinates(5);
+    MockPathFunction fn;
+    fn.m_SharedData->derivative = GenerateDouble();
+    fn.m_SharedData->argumentSize = m.coordinateAbsPaths.size();  // all coords affect the path
 
-    OpenSim::PinJoint* joint = new OpenSim::PinJoint{};
-    joint->connectSocket_parent_frame(model.getGround());
-    joint->connectSocket_child_frame(*body);
-    model.addJoint(joint);
+    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{fn, m.coordinateAbsPaths};
+    m.model.addComponent(fbp);
 
-    SimTK::State& s = model.initSystem();
+    SimTK::State& s = m.model.initSystem();
+    m.model.realizeAcceleration(s);
 
-    fbp->computeMomentArm(s, joint->getCoordinate());
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 0);
+    int coordIdx = 0;
+    double momentArm = fbp->computeMomentArm(s, m.model.getComponent<OpenSim::Coordinate>(m.coordinateAbsPaths[coordIdx]));
+    SimTK_TEST(fn.m_SharedData->numTimesCalcDerivativeCalled == 1);
+    SimTK_TEST(momentArm == fn.m_SharedData->derivative);
 }
-
-OSIM_TEST(FunctionBasedPath, ComputeMomentArmUsesPathFunctionImpl)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    OpenSim::Body* body = new OpenSim::Body{};
-    body->setMass(1.0);
-    model.addComponent(body);
-
-    OpenSim::PinJoint* joint = new OpenSim::PinJoint{};
-    joint->connectSocket_parent_frame(model.getGround());
-    joint->connectSocket_child_frame(*body);
-    model.addJoint(joint);
-
-    SimTK_TEST(pathFn.data->numTimesComputeMomentArmCalled == 0);
-
-    SimTK::State& s = model.initSystem();
-
-    SimTK_TEST(pathFn.data->numTimesComputeMomentArmCalled == 0);
-
-    SimTK_TEST(fbp->computeMomentArm(s, joint->getCoordinate()) == pathFn.data->computeMomentArmValue);
-
-    SimTK_TEST(pathFn.data->numTimesComputeMomentArmCalled == 1);
-}
-
-OSIM_TEST(FunctionBasedPath, PathFunctionExtendConnectToModelIsCalledWhenFinalizeConnectionCalledOnTopLevelModel)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesExtendConnectToModelCalled == 0);
-    model.finalizeConnections();
-    SimTK_TEST(pathFn.data->numTimesExtendConnectToModelCalled == 1);
-}
-
-OSIM_TEST(FunctionBasedPath, PathFunctionExtendInitStateFromPropertiesCalledWhenCalledOnTopLevelModel)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesExtendInitStateFromPropertiesCalled == 0);
-    model.initSystem();
-    SimTK_TEST(pathFn.data->numTimesExtendConnectToModelCalled == 1);
-}
-
-OSIM_TEST(FunctionBasedPath, PathFunctionExtendAddToSystemCalledWhenInitSystemCalledOnTopLevelModel)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);
-
-    SimTK_TEST(pathFn.data->numTimesExtendAddToSystemCalled == 0);
-    model.initSystem();
-    SimTK_TEST(pathFn.data->numTimesExtendAddToSystemCalled == 1);
-}
-
-OSIM_TEST(FunctionBasedPath, PathFunctionExtendFinalizePropertiesCalledWhenFinalizeFromPropertiesCalledOnTopLevelModel)
-{
-    OpenSim::Model model;
-    MockPathFunction pathFn;
-    OpenSim::FunctionBasedPath* fbp = new OpenSim::FunctionBasedPath{pathFn};
-    model.addComponent(fbp);  // also calls it?
-
-    SimTK_TEST(pathFn.data->numTimesExtendFinalizeFromPropertiesCalled == 1);
-    model.finalizeFromProperties();
-    SimTK_TEST(pathFn.data->numTimesExtendFinalizeFromPropertiesCalled == 2);
-}
-
 
 // HACK: test Joris's implementation here
 //
@@ -737,36 +959,359 @@ namespace joris {
         }
     };
 
+    // returns interpolated path length for a given permutation of coordinate
+    // values
+    //
+    // this is the "heart" of the FPB algorithm. It's loosely based on the algorithm
+    // described here:
+    //
+    //     "Two hierarchies of spline interpolations. Practical algorithms for multivariate higher order splines"
+    //     https://arxiv.org/abs/0905.3564
+    //
+    // `inputVals` points to a sequence of `nCoords` values that were probably
+    // retrieved via `Coordinate::getValue(SimTK::State const&)`. The reason
+    // that `inputVals` is provided externally (rather than have this implementation
+    // handle calling `getValue`) is because derivative calculations need to fiddle
+    // the input values slightly
+    double Impl_GetPathLength(
+            const std::vector<Discretization>& discretizations,
+            const std::vector<double>& evals,
+            const SimTK::Vector& coordVals)
+    {
+        SimTK_ASSERT_ALWAYS(!discretizations.empty(), "FBPs require at least one coordinate to affect the path");
+        SimTK_ASSERT_ALWAYS(coordVals.size() == static_cast<int>(discretizations.size()), "You must call this function with the correct number of (precomputed) coordinate values");
+
+        // compute:
+        //
+        // - the index of the first discretization step *before* the input value
+        //
+        // - the polynomial of the curve at that step, given its fractional distance
+        //   toward the next step
+        using Polynomial = std::array<double, 4>;
+        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
+        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
+        for (int coord = 0; coord < coordVals.size(); ++coord) {
+            double inputVal = coordVals[coord];
+            Discretization const& disc = discretizations[coord];
+            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
+
+            // compute index of first discretization step *before* the input value and
+            // the fraction that the input value is towards the *next* discretization step
+            int idx;
+            double frac;
+            if (inputVal < disc.begin+step) {
+                idx = 1;
+                frac = 0.0;
+            } else if (inputVal > disc.end-2*step) {
+                idx = disc.nsteps-3;
+                frac = 0.0;
+            } else {
+                // solve for `n`: inputVal = begin + n*step
+                double n = (inputVal - disc.begin) / step;
+                double wholePart;
+                double fractionalPart = std::modf(n, &wholePart);
+
+                idx = static_cast<int>(wholePart);
+                frac = fractionalPart;
+            }
+
+            // compute polynomial based on fraction the point is toward the next point
+            double frac2 = frac*frac;
+            double frac3 = frac2*frac;
+            double frac4 = frac3*frac;
+            double fracMinusOne = frac - 1;
+            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
+
+            Polynomial p;
+            p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
+            p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
+            p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
+            p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
+
+            closestDiscretizationSteps[coord] = idx;
+            betas[coord] = p;
+        }
+
+        // for each coord, permute through 4 locations *around* the input's location:
+        //
+        // - A one step before B
+        // - B the first discretization step before the input value
+        // - C one step after B
+        // - D one step after C
+        //
+        // where:
+        //
+        // - betas are coefficients that affect each location. beta[0] affects A,
+        //   betas[1] affects B, betas[2] affects C, and betas[3] affects D
+
+        // represent permuting through each location around each coordinate as a string
+        // of integer offsets that can be -1, 0, 1, or 2
+        //
+        // the algorithm increments this array as it goes through each permutation
+        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
+        for (int coord = 0; coord < coordVals.size(); ++coord) {
+            dimIdxOffsets[coord] = -1;
+        }
+
+        // permute through all locations around the input value
+        //
+        // e.g. the location permutations for 3 coords iterate like this for each
+        //      crank of the loop
+        //
+        //     [-1, -1, -1]
+        //     [-1, -1,  0]
+        //     [-1, -1,  1]
+        //     [-1, -1,  2]
+        //     [-1,  0, -1]
+        //     ...(4^3 steps total)...
+        //     [ 2,  2,  1]
+        //     [ 2,  2,  2]
+        //     [ 3,  0,  0]   (the termination condition)
+
+        double z = 0.0;
+        int cnt = 0;
+        while (dimIdxOffsets[0] < 3) {
+
+            // compute `beta` (weighted coefficient per coord) for this particular
+            // permutation's coordinate locations (e.g. -1, 0, 0, 2) and figure out
+            // what the closest input value was at the weighted location. Add the
+            // result the the output
+
+            double beta = 1.0;
+            int evalStride = 1;
+            int evalIdx = 0;
+
+            // go backwards, from least-significant coordinate (highest idx)
+            //
+            // this is so that we can compute the stride as the algorithm runs
+            for (int coord = coordVals.size()-1; coord >= 0; --coord) {
+                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
+                int closestStep = closestDiscretizationSteps[coord];
+                int step = closestStep + offset;
+
+                beta *= betas[coord][offset+1];
+                evalIdx += evalStride * step;
+                evalStride *= discretizations[coord].nsteps;
+            }
+
+            // equivalent to z += b*v, but handles rounding errors when the rhs
+            // is very small
+            z = std::fma(beta, evals.at(evalIdx), z);
+
+            // increment the offsets
+            //
+            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
+            {
+                int pos = coordVals.size()-1;
+                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
+                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                    dimIdxOffsets[pos] = -1;  // overflow
+                    ++dimIdxOffsets[pos-1];  // carry propagation
+                    --pos;
+                }
+            }
+
+            ++cnt;
+        }
+
+        // sanity check: is `z` accumulated from the expected number of iterations?
+        {
+            int expectedIterations = 1 << (2*coordVals.size());
+            if (cnt != expectedIterations) {
+                std::stringstream msg;
+                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
+            }
+        }
+
+        return z;
+    }
+
+    // get the *derivative* of the path length with respect to the given Coordinate index
+    // (in impl.coords)
+    double Impl_GetPathLengthDerivative(
+            const std::vector<Discretization>& discretizations,
+            const std::vector<double>& evals,
+            const SimTK::Vector& coordVals,
+            int coordIdx)
+    {
+        int nCoords = static_cast<int>(coordVals.size());
+
+        SimTK_ASSERT_ALWAYS(!discretizations.empty(), "FBPs require at least one coordinate to affect the path");
+        SimTK_ASSERT_ALWAYS(nCoords == static_cast<int>(discretizations.size()), "You must call this function with the correct number of (precomputed) coordinate values");
+
+        // compute:
+        //
+        // - the index of the first discretization step *before* the input value
+        //
+        // - the polynomial of the curve at that step, given its fractional distance
+        //   toward the next step
+        using Polynomial = std::array<double, 4>;
+        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
+        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
+        for (int coord = 0; coord < nCoords; ++coord) {
+            double inputVal = coordVals[coord];
+            Discretization const& disc = discretizations[coord];
+            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
+
+            // compute index of first discretization step *before* the input value and
+            // the fraction that the input value is towards the *next* discretization step
+            int idx;
+            double frac;
+            if (inputVal < disc.begin+step) {
+                idx = 1;
+                frac = 0.0;
+            } else if (inputVal > disc.end-2*step) {
+                idx = disc.nsteps-3;
+                frac = 0.0;
+            } else {
+                // solve for `n`: inputVal = begin + n*step
+                double n = (inputVal - disc.begin) / step;
+                double wholePart;
+                double fractionalPart = std::modf(n, &wholePart);
+
+                idx = static_cast<int>(wholePart);
+                frac = fractionalPart;
+            }
+
+            // compute polynomial based on fraction the point is toward the next point
+            double frac2 = frac*frac;
+            double frac3 = frac2*frac;
+            double frac4 = frac3*frac;
+            double fracMinusOne = frac - 1;
+            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
+
+            Polynomial p;
+            if (coord == coordIdx){
+                // derivative
+                p[0] = 5*frac4 - 10*frac3 + 4.5*frac2 + frac - 0.5;
+                p[1] = -15*frac4 + 30*frac3 - 13.5*frac2 - 2*frac;
+                p[2] = 15*frac4 - 30*frac3 + 13.5*frac2 + frac + 0.5;
+                p[3] = frac2*(-5*frac2 + 10*frac - 4.5);
+            } else {
+                // 'normal' spline function
+                p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
+                p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
+                p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
+                p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
+            }
+
+            closestDiscretizationSteps[coord] = idx;
+            betas[coord] = p;
+        }
+
+        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
+        for (int coord = 0; coord < nCoords; ++coord) {
+            dimIdxOffsets[coord] = -1;
+        }
+
+        double z = 0.0;
+        int cnt = 0;
+        while (dimIdxOffsets[0] < 3) {
+
+            double beta = 1.0;
+            int evalStride = 1;
+            int evalIdx = 0;
+
+            for (int coord = nCoords-1; coord >= 0; --coord) {
+                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
+                int closestStep = closestDiscretizationSteps[coord];
+                int step = closestStep + offset;
+
+                beta *= betas[coord][offset+1];
+                evalIdx += evalStride * step;
+                evalStride *= discretizations[coord].nsteps;
+            }
+
+            double gridSize = (discretizations[coordIdx].end-discretizations[coordIdx].begin)/discretizations[coordIdx].nsteps;
+            z = std::fma(beta, evals.at(evalIdx)/gridSize, z);
+            {
+                int pos = nCoords-1;
+                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
+                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                    dimIdxOffsets[pos] = -1;  // overflow
+                    ++dimIdxOffsets[pos-1];  // carry propagation
+                    --pos;
+                }
+            }
+
+            ++cnt;
+        }
+        {
+            int expectedIterations = 1 << (2*nCoords);
+            if (cnt != expectedIterations) {
+                std::stringstream msg;
+                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
+            }
+        }
+
+        return z;
+    }
+
     class FunctionBasedPathDiscretizationSet : public OpenSim::Set<FunctionBasedPathDiscretization> {
         OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretizationSet, OpenSim::Set<FunctionBasedPathDiscretization>);
     };
 
-    class JorisFBP : public OpenSim::PathFunction {
-        OpenSim_DECLARE_CONCRETE_OBJECT(JorisFBP, OpenSim::PathFunction);
-
+    class JorisPathSimTKFunction : public SimTK::Function {
+        std::shared_ptr<std::vector<Discretization>> _discretizations;
+        std::shared_ptr<std::vector<double>> _evaluations;
     public:
-        OpenSim_DECLARE_UNNAMED_PROPERTY(FunctionBasedPathDiscretizationSet, "Discretizations that were used for each OpenSim::Coordinate that the path was fitted against");
-        OpenSim_DECLARE_LIST_PROPERTY(Evaluations, double, "The evaluated results of each *permutation* of discretizations. The FunctionBasedPathDiscretizationSet property describes how each OpenSim::Coordinate was discretized. These evaluations are the result of permuting through all possible combinations of discretizations. Effectively, this property contains a N-dimensional 'surface' of points, where each dimension of the surface is a Coordinate, and each dimension of each point is one of the evenly-spaced points in the discretization range [x_begin, x_range] for each dimension");
+        JorisPathSimTKFunction(
+                std::shared_ptr<std::vector<Discretization>> discretizations,
+                std::shared_ptr<std::vector<double>> evaluations) :
+            _discretizations{std::move(discretizations)},
+            _evaluations{std::move(evaluations)}
+        {
+        }
 
-        // direct pointers to each coordinate
-        std::vector<OpenSim::Coordinate const*> coords;
+        double calcValue(const SimTK::Vector& coordVals) const override
+        {
+            return Impl_GetPathLength(*_discretizations, *_evaluations, coordVals);
+        }
 
-        // absolute paths of each coordinate (1:1 with coords)
-        std::vector<std::string> coordAbsPaths;
+        double calcDerivative(const SimTK::Array_<int>& derivComponents, const SimTK::Vector& coordVals) const override
+        {
+            SimTK_ASSERT_ALWAYS(derivComponents.size() == 1, "Can only find first-order derivative w.r.t. one coord");
+            return Impl_GetPathLengthDerivative(*_discretizations, *_evaluations, coordVals, derivComponents[0]);
+        }
 
-        // discretizations ranges for each coordinate (1:1 with coords)
-        std::vector<Discretization> discretizations;
+        int getArgumentSize() const override
+        {
+            return static_cast<int>(_discretizations->size());
+        }
 
-        // evaluations for each permutation of coordinates' discretizations
-        std::vector<double> evals;
+        int getMaxDerivativeOrder() const override
+        {
+            return 1;
+        }
+    };
 
-        JorisFBP();
-        double getLength(const SimTK::State&) const override;
-        double getLengtheningSpeed(const SimTK::State&) const override;
-        double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const override;
-        void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const override;
-        void extendFinalizeFromProperties() override;
-        void extendFinalizeConnections(OpenSim::Component&) override;
+    class JorisPathFunction final : public OpenSim::Function {
+        OpenSim_DECLARE_CONCRETE_OBJECT(JorisPathFunction, OpenSim::Function);
+        // TODO: this needs to have PROPERTYs to store the discretizations + evaluations
+    public:
+        std::shared_ptr<std::vector<Discretization>> _discretizations;
+        std::shared_ptr<std::vector<double>> _evaluations;
+    public:
+        JorisPathFunction() :
+            _discretizations{std::make_shared<std::vector<Discretization>>()},
+            _evaluations{std::make_shared<std::vector<double>>()}
+        {
+        }
+
+        JorisPathFunction(
+                std::shared_ptr<std::vector<Discretization>> discretizations,
+                std::shared_ptr<std::vector<double>> evaluations) :
+            _discretizations{std::move(discretizations)},
+            _evaluations{std::move(evaluations)}
+        {
+        }
+
+        SimTK::Function* createSimTKFunction() const override
+        {
+            return new JorisPathSimTKFunction{_discretizations, _evaluations};
+        }
     };
 
     struct FittingParams final {
@@ -818,15 +1363,19 @@ namespace joris {
         }
     };
 
+    /** TODO: handle computing a fresh FBP from a PBP, flashing from props, etc.
+
     // compute fresh implementation data from an existing PointBasedPath by
     // evaluating it and fitting it to a function-based curve
     //
     // returns false if too many/too little coordinates affect the path
     bool Impl_ComputeFromPBP(
-            JorisFBP& impl,
             const OpenSim::Model& model,
             const OpenSim::PointBasedPath& pbp,
-            const FittingParams& params)
+            const FittingParams& params,
+            std::vector<Discretization>& discretizationsOut,
+            std::vector<double>& evalsOut,
+            std::vector<std::string>& coordAbsPathsOut)
     {
         // copy model, so we can independently equilibrate + realize + modify the
         // copy without having to touch the source model
@@ -916,386 +1465,6 @@ namespace joris {
         }
     }
 
-    // returns interpolated path length for a given permutation of coordinate
-    // values
-    //
-    // this is the "heart" of the FPB algorithm. It's loosely based on the algorithm
-    // described here:
-    //
-    //     "Two hierarchies of spline interpolations. Practical algorithms for multivariate higher order splines"
-    //     https://arxiv.org/abs/0905.3564
-    //
-    // `inputVals` points to a sequence of `nCoords` values that were probably
-    // retrieved via `Coordinate::getValue(SimTK::State const&)`. The reason
-    // that `inputVals` is provided externally (rather than have this implementation
-    // handle calling `getValue`) is because derivative calculations need to fiddle
-    // the input values slightly
-    double Impl_GetPathLength(JorisFBP const& impl,
-                                     double const* inputVals,
-                                     int nCoords)
-    {
-        SimTK_ASSERT_ALWAYS(!impl.coords.empty(), "FBPs require at least one coordinate to affect the path");
-        SimTK_ASSERT_ALWAYS(nCoords == static_cast<int>(impl.coords.size()), "You must call this function with the correct number of (precomputed) coordinate values");
-
-        // compute:
-        //
-        // - the index of the first discretization step *before* the input value
-        //
-        // - the polynomial of the curve at that step, given its fractional distance
-        //   toward the next step
-        using Polynomial = std::array<double, 4>;
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
-        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            double inputVal = inputVals[coord];
-            Discretization const& disc = impl.discretizations[coord];
-            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
-
-            // compute index of first discretization step *before* the input value and
-            // the fraction that the input value is towards the *next* discretization step
-            int idx;
-            double frac;
-            if (inputVal < disc.begin+step) {
-                idx = 1;
-                frac = 0.0;
-            } else if (inputVal > disc.end-2*step) {
-                idx = disc.nsteps-3;
-                frac = 0.0;
-            } else {
-                // solve for `n`: inputVal = begin + n*step
-                double n = (inputVal - disc.begin) / step;
-                double wholePart;
-                double fractionalPart = std::modf(n, &wholePart);
-
-                idx = static_cast<int>(wholePart);
-                frac = fractionalPart;
-            }
-
-            // compute polynomial based on fraction the point is toward the next point
-            double frac2 = frac*frac;
-            double frac3 = frac2*frac;
-            double frac4 = frac3*frac;
-            double fracMinusOne = frac - 1;
-            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
-
-            Polynomial p;
-            p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
-            p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
-            p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
-            p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
-
-            closestDiscretizationSteps[coord] = idx;
-            betas[coord] = p;
-        }
-
-        // for each coord, permute through 4 locations *around* the input's location:
-        //
-        // - A one step before B
-        // - B the first discretization step before the input value
-        // - C one step after B
-        // - D one step after C
-        //
-        // where:
-        //
-        // - betas are coefficients that affect each location. beta[0] affects A,
-        //   betas[1] affects B, betas[2] affects C, and betas[3] affects D
-
-        // represent permuting through each location around each coordinate as a string
-        // of integer offsets that can be -1, 0, 1, or 2
-        //
-        // the algorithm increments this array as it goes through each permutation
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            dimIdxOffsets[coord] = -1;
-        }
-
-        // permute through all locations around the input value
-        //
-        // e.g. the location permutations for 3 coords iterate like this for each
-        //      crank of the loop
-        //
-        //     [-1, -1, -1]
-        //     [-1, -1,  0]
-        //     [-1, -1,  1]
-        //     [-1, -1,  2]
-        //     [-1,  0, -1]
-        //     ...(4^3 steps total)...
-        //     [ 2,  2,  1]
-        //     [ 2,  2,  2]
-        //     [ 3,  0,  0]   (the termination condition)
-
-        double z = 0.0;
-        int cnt = 0;
-        while (dimIdxOffsets[0] < 3) {
-
-            // compute `beta` (weighted coefficient per coord) for this particular
-            // permutation's coordinate locations (e.g. -1, 0, 0, 2) and figure out
-            // what the closest input value was at the weighted location. Add the
-            // result the the output
-
-            double beta = 1.0;
-            int evalStride = 1;
-            int evalIdx = 0;
-
-            // go backwards, from least-significant coordinate (highest idx)
-            //
-            // this is so that we can compute the stride as the algorithm runs
-            for (int coord = nCoords-1; coord >= 0; --coord) {
-                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
-                int closestStep = closestDiscretizationSteps[coord];
-                int step = closestStep + offset;
-
-                beta *= betas[coord][offset+1];
-                evalIdx += evalStride * step;
-                evalStride *= impl.discretizations[coord].nsteps;
-            }
-
-            // equivalent to z += b*v, but handles rounding errors when the rhs
-            // is very small
-            z = std::fma(beta, impl.evals.at(evalIdx), z);
-
-            // increment the offsets
-            //
-            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
-            {
-                int pos = nCoords-1;
-                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
-                    dimIdxOffsets[pos] = -1;  // overflow
-                    ++dimIdxOffsets[pos-1];  // carry propagation
-                    --pos;
-                }
-            }
-
-            ++cnt;
-        }
-
-        // sanity check: is `z` accumulated from the expected number of iterations?
-        {
-            int expectedIterations = 1 << (2*nCoords);
-            if (cnt != expectedIterations) {
-                std::stringstream msg;
-                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
-                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-            }
-        }
-
-        return z;
-    }
-
-    // get the length of the path in the current state
-    double Impl_GetPathLength(JorisFBP const& impl, SimTK::State const& s)
-    {
-        int nCoords = static_cast<int>(impl.coords.size());
-
-        // get the input value of each coordinate in the current state
-        std::array<double, g_MaxCoordsThatCanBeInterpolated> inputVals{};
-        for (int coord = 0; coord < nCoords; ++coord) {
-            inputVals[coord] = impl.coords[coord]->getValue(s);
-        }
-
-        return Impl_GetPathLength(impl, inputVals.data(), nCoords);
-    }
-
-    // get the *derivative* of the path length with respect to the given Coordinate index
-    // (in impl.coords)
-    //static double Impl_GetPathLengthDerivative(OpenSim::FunctionBasedPath::Impl const& impl,
-    //                                           SimTK::State const& s,
-    //                                           int coordIdx) {
-
-    //    SimTK_ASSERT_ALWAYS(!impl.coords.empty(), "FBPs require at least one coordinate to affect the path");
-    //    SimTK_ASSERT_ALWAYS(coordIdx != -1, "coord index must be valid");
-    //    SimTK_ASSERT_ALWAYS(coordIdx < static_cast<int>(impl.coords.size()), "coord index must be valid");
-
-    //    int nCoords = static_cast<int>(impl.coords.size());
-
-    //    // get the input value of each coordinate in the current state
-    //    std::array<double, g_MaxCoordsThatCanBeInterpolated> inputVals{};
-    //    for (int coord = 0; coord < nCoords; ++coord) {
-    //        inputVals[coord] = impl.coords[coord]->getValue(s);
-    //    }
-
-    //    // compute value at current point
-    //    double v1 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
-
-    //    static constexpr double h = 0.00001;
-
-    //    // alter the input value for the to-be-derived coordinate *slightly* and recompute
-    //    inputVals[coordIdx] += h;
-    //    double v2 = Impl_GetPathLength(impl, inputVals.data(), nCoords);
-
-    //    // the derivative is how much the output changed when the input was altered
-    //    // slightly (this is a poor-man's discrete derivative method)
-    //    return (v2 - v1) / h;
-    //}
-    double Impl_GetPathLengthDerivative(JorisFBP const& impl,
-                                        SimTK::State const& s,
-                                        int coordIdx)
-    {
-        int nCoords = static_cast<int>(impl.coords.size());
-
-        SimTK_ASSERT_ALWAYS(!impl.coords.empty(), "FBPs require at least one coordinate to affect the path");
-        SimTK_ASSERT_ALWAYS(nCoords == static_cast<int>(impl.coords.size()), "You must call this function with the correct number of (precomputed) coordinate values");
-
-        // get the input value of each coordinate in the current state
-        std::array<double, g_MaxCoordsThatCanBeInterpolated> inputVals{};
-        for (int coord = 0; coord < nCoords; ++coord) {
-            inputVals[coord] = impl.coords[coord]->getValue(s);
-        }
-
-        // compute:
-        //
-        // - the index of the first discretization step *before* the input value
-        //
-        // - the polynomial of the curve at that step, given its fractional distance
-        //   toward the next step
-        using Polynomial = std::array<double, 4>;
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
-        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            double inputVal = inputVals[coord];
-            Discretization const& disc = impl.discretizations[coord];
-            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
-
-            // compute index of first discretization step *before* the input value and
-            // the fraction that the input value is towards the *next* discretization step
-            int idx;
-            double frac;
-            if (inputVal < disc.begin+step) {
-                idx = 1;
-                frac = 0.0;
-            } else if (inputVal > disc.end-2*step) {
-                idx = disc.nsteps-3;
-                frac = 0.0;
-            } else {
-                // solve for `n`: inputVal = begin + n*step
-                double n = (inputVal - disc.begin) / step;
-                double wholePart;
-                double fractionalPart = std::modf(n, &wholePart);
-
-                idx = static_cast<int>(wholePart);
-                frac = fractionalPart;
-            }
-
-            // compute polynomial based on fraction the point is toward the next point
-            double frac2 = frac*frac;
-            double frac3 = frac2*frac;
-            double frac4 = frac3*frac;
-            double fracMinusOne = frac - 1;
-            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
-
-            Polynomial p;
-            if (coord == coordIdx){
-                // derivative
-                p[0] = 5*frac4 - 10*frac3 + 4.5*frac2 + frac - 0.5;
-                p[1] = -15*frac4 + 30*frac3 - 13.5*frac2 - 2*frac;
-                p[2] = 15*frac4 - 30*frac3 + 13.5*frac2 + frac + 0.5;
-                p[3] = frac2*(-5*frac2 + 10*frac - 4.5);
-            } else {
-                // 'normal' spline function
-                p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
-                p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
-                p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
-                p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
-            }
-
-            closestDiscretizationSteps[coord] = idx;
-            betas[coord] = p;
-        }
-
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            dimIdxOffsets[coord] = -1;
-        }
-
-        double z = 0.0;
-        int cnt = 0;
-        while (dimIdxOffsets[0] < 3) {
-
-            double beta = 1.0;
-            int evalStride = 1;
-            int evalIdx = 0;
-
-            for (int coord = nCoords-1; coord >= 0; --coord) {
-                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
-                int closestStep = closestDiscretizationSteps[coord];
-                int step = closestStep + offset;
-
-                beta *= betas[coord][offset+1];
-                evalIdx += evalStride * step;
-                evalStride *= impl.discretizations[coord].nsteps;
-            }
-
-            double gridSize = (impl.discretizations[coordIdx].end-impl.discretizations[coordIdx].begin)/impl.discretizations[coordIdx].nsteps;
-            z = std::fma(beta, impl.evals.at(evalIdx)/gridSize, z);
-            {
-                int pos = nCoords-1;
-                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
-                    dimIdxOffsets[pos] = -1;  // overflow
-                    ++dimIdxOffsets[pos-1];  // carry propagation
-                    --pos;
-                }
-            }
-
-            ++cnt;
-        }
-        {
-            int expectedIterations = 1 << (2*nCoords);
-            if (cnt != expectedIterations) {
-                std::stringstream msg;
-                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
-                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-            }
-        }
-
-        return z;
-    }
-
-    // get the *derivative* of the path length with respect to the given Coordinate
-    double Impl_GetPathLengthDerivative(JorisFBP const& impl,
-                                        SimTK::State const& s,
-                                        OpenSim::Coordinate const& c)
-    {
-        // figure out the index of the coordinate being referred to
-        int coordIdx = -1;
-        for (int i = 0; i < static_cast<int>(impl.coords.size()); ++i) {
-            if (impl.coords[i] == &c) {
-                coordIdx = i;
-                break;
-            }
-        }
-
-        // ensure the coordinate was actually found, or this alg will break
-        if (coordIdx == -1) {
-            std::stringstream msg;
-            msg << "could not find coordiante '" << c.getName() << "' in the set of coordinates the FunctionBasedPath handles. Coordinates handled by this path are: ";
-            char const* delim = "";
-            for (OpenSim::Coordinate const* c : impl.coords) {
-                msg << delim << c->getName();
-                delim = ", ";
-            }
-            OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-        }
-
-        // use the "raw" (non-lookup) version of this function with the index
-        return Impl_GetPathLengthDerivative(impl, s, coordIdx);
-    }
-
-    // get the lengthening speed of the path in the current state
-    double Impl_GetLengtheningSpeed(const JorisFBP& impl,
-                                    const SimTK::State& state)
-    {
-        double lengtheningSpeed = 0.0;
-        for (int coordIdx = 0; coordIdx < static_cast<int>(impl.coords.size()); ++coordIdx) {
-            double deriv = Impl_GetPathLengthDerivative(impl, state, coordIdx);
-            double coordSpeedVal = impl.coords[coordIdx]->getSpeedValue(state);
-
-            lengtheningSpeed = std::fma(deriv, coordSpeedVal, lengtheningSpeed);
-        }
-        return lengtheningSpeed;
-    }
-
     std::unique_ptr<JorisFBP> fromPointBasedPath(
             const Model& model,
             const PointBasedPath& pbp,
@@ -1354,78 +1523,33 @@ namespace joris {
 
         return fbp;
     }
+    */
+}
 
-    JorisFBP::JorisFBP()
-    {
-        constructProperty_FunctionBasedPathDiscretizationSet(FunctionBasedPathDiscretizationSet{});
-        constructProperty_Evaluations();
-    }
-
-    double JorisFBP::getLength(const SimTK::State& s) const
-    {
-        return Impl_GetPathLength(*this, s);
-    }
-
-    double JorisFBP::getLengtheningSpeed(const SimTK::State& s) const
-    {
-        return Impl_GetLengtheningSpeed(*this, s);
-    }
-
-    double JorisFBP::computeMomentArm(const SimTK::State& s, const OpenSim::Coordinate& aCoord) const
-    {
-        return Impl_GetPathLengthDerivative(*this, s, aCoord);
-    }
-
-    void JorisFBP::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector& mobilityForces) const
-    {
-        const SimTK::SimbodyMatterSubsystem& matter = getModel().getMatterSubsystem();
-
-        for (const OpenSim::Coordinate* coord :  coords) {
-            double ma = computeMomentArm(state, *coord);
-            double torqueOverCoord = -tension*ma;
-
-            matter.addInMobilityForce(state,
-                                      SimTK::MobilizedBodyIndex(coord->getBodyIndex()),
-                                      SimTK::MobilizerUIndex(coord->getMobilizerQIndex()),
-                                      torqueOverCoord,
-                                      mobilityForces);
-        }
-    }
-
-    void JorisFBP::extendFinalizeFromProperties()
-    {
-        Impl_InitFromFBPProperties(*this);
-    }
-
-    void JorisFBP::extendFinalizeConnections(OpenSim::Component& root)
-    {
-        // populate pointer-based coordinate lookups
-        //
-        // the reason this isn't done in `extendFinalizeFromProperties` is because the
-        // not-yet-property-finalized Model hasn't necessarily "connected" to the
-        // coordinates that the coordinate files refer to, so the implementation
-        // can't lookup the `OpenSim::Coordinate*` pointers during that phase
-
-        // Allow (model) component to include its own subcomponents
-        // before calling the base method which automatically invokes
-        // connect all the subcomponents.
-        {
-            Model* model = dynamic_cast<Model*>(&root);
-            if (model) {
-                connectToModel(*model);
-            }
-        }
-
-        Impl_SetCoordinatePointersFromCoordinatePaths(*this, root);
-    }
-
+// TODO: test Joris's implementation with analytic functions etc.
+namespace joris {
     OSIM_TEST(JorisFBP, CanBeDefaultConstructed)
     {
-        JorisFBP fbp;
+        JorisPathFunction fn;
     }
 
-    // TODO: port `Applications/FunctionBasedPathConversion/test/testFunctionBasedPathConversion.cpp`
-    // see: `https://github.com/joris997/opensim-core/tree/interpolation/Applications/FunctionBasedPathConversion`
+    OSIM_TEST(JorisFBP, CanBeUsedInAFunctionBasedPath)
+    {
+        JorisPathFunction fn;
+        OpenSim::FunctionBasedPath{fn, {}};  // trivial-case
+    }
+
+    OSIM_TEST(JorisFBP, HasDerivativeOrderGreaterThanOrEqualTo1)
+    {
+        // the path function should be differentiable
+
+        JorisPathFunction fn;
+        SimTK_TEST(fn.getMaxDerivativeOrder() >= 1)
+    }
+
+    // etc.: maybe these tests can be broken down into lower-level and higher
+    //       -level (e.g. test low-level polynomial maths, test their use in
+    //       a higher-level function object, etc. etc.)
 }
 
 int main()

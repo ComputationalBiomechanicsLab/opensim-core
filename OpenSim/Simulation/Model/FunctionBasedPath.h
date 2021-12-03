@@ -2,6 +2,7 @@
 #define OPENSIM_FUNCTIONBASED_PATH_H_
 
 #include <OpenSim/Common/Array.h>
+#include <OpenSim/Common/Function.h>
 #include <OpenSim/Simulation/Model/GeometryPath.h>
 #include <OpenSim/Simulation/Model/ModelComponent.h>
 #include <SimTKcommon/internal/Vec.h>
@@ -24,27 +25,6 @@ class Coordinate;
 class PointForceDirection;
 
 /**
- * An interface for an object that can compute the length, lengthening speed,
- * and moment arm (w.r.t. a particular `OpenSim::Coordinate`) of a path at
- * runtime.
- *
- * See `FunctionBasedPath` for a standard implementation of a `GeometryPath`
- * that automatically handles forwarding calls to the `PathFunction`, state
- * caching, etc.
- */
-class OSIMSIMULATION_API PathFunction : public OpenSim::ModelComponent {
-    OpenSim_DECLARE_ABSTRACT_OBJECT(PathFunction, OpenSim::Component)
-
-public:
-    virtual ~PathFunction() noexcept = default;
-
-    virtual double getLength(const SimTK::State&) const = 0;
-    virtual double getLengtheningSpeed(const SimTK::State&) const = 0;
-    virtual double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const = 0;
-    virtual void addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const = 0;
-};
-
-/**
  * An `OpenSim::GeometryPath` that uses `PathFunction`s to compute its state.
  *
  * A `FunctionBasedPath` uses an externally-provided `PathFunction` to compute the
@@ -54,21 +34,30 @@ public:
 class OSIMSIMULATION_API FunctionBasedPath final : public GeometryPath {
     OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPath, GeometryPath);
 
-    OpenSim_DECLARE_PROPERTY(PathFunction, PathFunction, "The underlying function that is used at simulation-time to evaluate the length, lengthening speed, and moment arm of the path.");
+    OpenSim_DECLARE_PROPERTY(PathFunction, OpenSim::Function, "The underlying function that is used at simulation-time to evaluate the length and lengthening speed (derivative) of the path. The function's arity (and argument order) is equal to the coordinates that affect the path. At evaluation-time, the function (value + derivative) is called with a sequence of the coordinate values (the values of each coordinate in the current state)");
+    OpenSim_DECLARE_LIST_PROPERTY(Coordinates, std::string, "Absolute paths to coordinates in the model. The number of coordinates provided must equal the arity of the function property. At simulation-time, each of these coordinates are looked up to get their values, which are pumped into the path evaluation function");
 
     mutable CacheVariable<double> _lengthCV;
     mutable CacheVariable<double> _speedCV;
     mutable CacheVariable<SimTK::Vec3> _colorCV;
+    mutable SimTK::Vector _functionArgsBuffer;
+    mutable std::vector<int> _derivativeOrderBuffer;
 
 public:
     FunctionBasedPath();
     FunctionBasedPath(const FunctionBasedPath&);
-    FunctionBasedPath(FunctionBasedPath&&) noexcept;
-    explicit FunctionBasedPath(PathFunction const&);
+
+    /**
+     * Construct the FunctionBasedPath and immediately assign its PathFunction and
+     * Coordinates list.
+     *
+     * The length of the coordinates list must match the artity (getArgumentSize)
+     * of the function. The function must be differentiable.
+     */
+    FunctionBasedPath(const OpenSim::Function&, std::vector<std::string> coordAbsPaths);
     ~FunctionBasedPath() noexcept;
 
     FunctionBasedPath& operator=(FunctionBasedPath const&);
-    FunctionBasedPath& operator=(FunctionBasedPath&&) noexcept;
 
     SimTK::Vec3 getColor(const SimTK::State& s) const override;
     void setColor(const SimTK::State& s, const SimTK::Vec3& color) const override;
@@ -84,8 +73,13 @@ public:
     double computeMomentArm(const SimTK::State& s,
                             const Coordinate& aCoord) const override;
 
+    void extendFinalizeFromProperties() override;
     void extendAddToSystem(SimTK::MultibodySystem& system) const override;
     void extendInitStateFromProperties(SimTK::State& s) const override;
+    void extendFinalizeConnections(OpenSim::Component&) override;
+private:
+    const SimTK::Vector& calcFunctionArguments(const SimTK::State&) const;
+    int indexOfCoordinate(const Coordinate&) const;
 };
 }
 

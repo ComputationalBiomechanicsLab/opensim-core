@@ -4,58 +4,139 @@
 #include <OpenSim/Simulation/Model/Model.h>
 #include <OpenSim/Simulation/SimbodyEngine/Coordinate.h>
 
+#include <sstream>
+
 namespace {
-    // used as a stub PathFunction implementation that throws if the user tries
-    // to actually use it
+    OpenSim::Exception InvalidFunctionError(std::string parentPath, char const* funcName)
+    {
+        std::stringstream ss;
+        ss << parentPath << ':' << funcName << ": cannot call underlying function: it has not been initialized yet: ensure you have assigned a function to this FunctionBasedPath and finalized its properites";
+        return OpenSim::Exception{ss.str()};
+    }
+
+    // stub function that will throw an exception with an information message if called
     //
-    // handy for handling the case where we need *some* PathFunction to stand-in
-    // before (e.g.) a "proper" path function is assigned to a property or
-    // something.
-    static char const g_ThrowingPathErrMsg[] = "Cannot call any member on a ThrowingPathFunction. This exception has *probably* been throwng because a PathFunction has not (yet) been assigned for the parent component. You *probably* need to ensure that a FunctionBasedPath actually has PathFunction assigned to it";
-    class ThrowingPathFunction final : public OpenSim::PathFunction {
-        OpenSim_DECLARE_CONCRETE_OBJECT(ThrowingPathFunction, OpenSim::PathFunction)
-
-        double getLength(const SimTK::State&) const override
+    // used as a stand-in for the object state where the caller has allocated a FunctionBasedPath
+    // but hasn't set its underlying function yet.
+    class ThrowingSimTKFunction final : public SimTK::Function {
+        std::string m_ParentPath;
+    public:
+        explicit ThrowingSimTKFunction(const std::string& parentPath) :
+            m_ParentPath{parentPath}
         {
-            OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
         }
 
-        double getLengtheningSpeed(const SimTK::State&) const override
+        double calcValue(const SimTK::Vector&) const override
         {
-            OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
+            throw InvalidFunctionError(m_ParentPath, __func__);
         }
 
-        double computeMomentArm(const SimTK::State&, const OpenSim::Coordinate&) const override
+        double calcDerivative(const SimTK::Array_<int>&, const SimTK::Vector&) const override
         {
-            OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
+            throw InvalidFunctionError(m_ParentPath, __func__);
         }
 
-        void addInEquivalentForces(const SimTK::State&, double, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector&) const override
+        int getArgumentSize() const override
         {
-            OPENSIM_THROW_FRMOBJ(OpenSim::Exception, g_ThrowingPathErrMsg);
+            throw InvalidFunctionError(m_ParentPath, __func__);
+        }
+
+        int getMaxDerivativeOrder() const override
+        {
+            throw InvalidFunctionError(m_ParentPath, __func__);
         }
     };
+
+    // stub function that will throw an exception with an information message if called
+    //
+    // used as a stand-in for the object state where the caller has allocated a FunctionBasedPath
+    // but hasn't set its underlying function yet.
+    class ThrowingOpenSimFunction final : public OpenSim::Function {
+        OpenSim_DECLARE_CONCRETE_OBJECT(ThrowingOpenSimFunction, OpenSim::Function)
+
+        std::string m_ParentPath;
+    public:
+        explicit ThrowingOpenSimFunction(const std::string& parentPath) :
+          m_ParentPath{parentPath}
+        {
+        }
+
+        double calcValue(const SimTK::Vector&) const override
+        {
+            throw InvalidFunctionError(m_ParentPath, __func__);
+        }
+
+        double calcDerivative(const std::vector<int>&, const SimTK::Vector&) const override
+        {
+            throw InvalidFunctionError(m_ParentPath, __func__);
+        }
+
+        int getArgumentSize() const override
+        {
+            throw InvalidFunctionError(m_ParentPath, __func__);
+        }
+
+        int getMaxDerivativeOrder() const override
+        {
+            throw InvalidFunctionError(m_ParentPath, __func__);
+        }
+
+        SimTK::Function* createSimTKFunction() const override
+        {
+            return new ThrowingSimTKFunction{m_ParentPath};
+        }
+    };
+
+    void ValidatePropertiesOrThrow(const OpenSim::FunctionBasedPath& parent,
+                                   const OpenSim::Property<OpenSim::Function>& funcProp,
+                                   const OpenSim::Property<std::string>& coordPathsProp)
+    {
+        if (funcProp.size() == 0) {
+            throw OpenSim::Exception(__FILE__, __LINE__, __func__, parent, "A FunctionBasedPath's function property has not been set");
+        }
+
+        if (funcProp.getValue().getMaxDerivativeOrder() < 1) {
+            throw OpenSim::Exception(__FILE__, __LINE__, __func__, parent, "The function provided to a FunctionBasedPath is not differentiable: it cannot be used as a path function");
+        }
+
+        if (funcProp.getValue().getArgumentSize() != coordPathsProp.size()) {
+            std::stringstream ss;
+            ss << "The number of coordinate paths provided (" << coordPathsProp.size() << ") does not match the number of arguments the function, " << funcProp.getValue().getName() << ", takes (" << funcProp.getValue().getArgumentSize() << ")";
+            throw OpenSim::Exception(__FILE__, __LINE__, __func__, parent, ss.str());
+        }
+
+        int nCoords = coordPathsProp.size();
+        for (int i = 0; i < nCoords; ++i) {
+            const std::string& coordPath = coordPathsProp.getValue(i);
+            if (coordPath.empty()) {
+                throw OpenSim::Exception(__FILE__, __LINE__, __func__, parent, "An empty coordinate string was provided to a FunctionBasedPath: all coordinate strings must be absolute paths to coordinates within the model");
+            }
+        }
+    }
 }
 
 OpenSim::FunctionBasedPath::FunctionBasedPath() : GeometryPath{}
 {
-    constructProperty_PathFunction(ThrowingPathFunction{});
+    constructProperty_PathFunction(ThrowingOpenSimFunction{this->getAbsolutePathString()});
+    constructProperty_Coordinates();
 }
 
 OpenSim::FunctionBasedPath::FunctionBasedPath(const FunctionBasedPath&) = default;
 
-OpenSim::FunctionBasedPath::FunctionBasedPath(FunctionBasedPath&&) noexcept = default;
-
-OpenSim::FunctionBasedPath::FunctionBasedPath(PathFunction const& pathFn) : GeometryPath{}
+OpenSim::FunctionBasedPath::FunctionBasedPath(const OpenSim::Function& func, std::vector<std::string> coordAbsPaths)
 {
-    constructProperty_PathFunction(pathFn);
+    constructProperty_PathFunction(func);
+    constructProperty_Coordinates();
+    for (std::string& coordAbsPath : coordAbsPaths) {
+        updProperty_Coordinates().appendValue(std::move(coordAbsPath));
+    }
+
+    ValidatePropertiesOrThrow(*this, getProperty_PathFunction(), getProperty_Coordinates());
 }
 
 OpenSim::FunctionBasedPath::~FunctionBasedPath() noexcept = default;
 
 OpenSim::FunctionBasedPath& OpenSim::FunctionBasedPath::operator=(const FunctionBasedPath&) = default;
-
-OpenSim::FunctionBasedPath& OpenSim::FunctionBasedPath::operator=(FunctionBasedPath&&) noexcept = default;
 
 SimTK::Vec3 OpenSim::FunctionBasedPath::getColor(const SimTK::State& s) const
 {
@@ -73,7 +154,8 @@ double OpenSim::FunctionBasedPath::getLength(const SimTK::State& s) const
         return getCacheVariableValue(s, _lengthCV);
     }
 
-    double v = getProperty_PathFunction().getValue().getLength(s);
+    const SimTK::Vector& args = calcFunctionArguments(s);
+    double v = getProperty_PathFunction().getValue().calcValue(args);
     setCacheVariableValue(s, _lengthCV, v);
     return v;
 }
@@ -84,19 +166,71 @@ double OpenSim::FunctionBasedPath::getLengtheningSpeed(const SimTK::State& s) co
         return getCacheVariableValue(s, _speedCV);
     }
 
-    double v = getProperty_PathFunction().getValue().getLengtheningSpeed(s);
-    setCacheVariableValue(s, _speedCV, v);
-    return v;
+    // the lengthening speed is the sum of: pathDeriv (w.r.t. coord) * coordinateSpeed
+    _derivativeOrderBuffer.resize(1);
+    const SimTK::Vector& args = calcFunctionArguments(s);
+    int nCoords = getProperty_Coordinates().size();
+    double acc = 0.0;
+    for (int i = 0; i < nCoords; ++i) {
+        const std::string& coordAbsPath = get_Coordinates(i);
+        const OpenSim::Coordinate& coord = getRoot().getComponent<OpenSim::Coordinate>(coordAbsPath);
+        _derivativeOrderBuffer[0] = i;
+        double deriv = get_PathFunction().calcDerivative(_derivativeOrderBuffer, args);
+        double coordSpeed = coord.getSpeedValue(s);
+
+        acc = acc + deriv*coordSpeed;
+    }
+    setCacheVariableValue(s, _speedCV, acc);
+    return acc;
 }
 
-void OpenSim::FunctionBasedPath::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>& bodyForces, SimTK::Vector& mobilityForces) const
+void OpenSim::FunctionBasedPath::addInEquivalentForces(const SimTK::State& state, double tension, SimTK::Vector_<SimTK::SpatialVec>&, SimTK::Vector& mobilityForces) const
 {
-    getProperty_PathFunction().getValue().addInEquivalentForces(state, tension, bodyForces, mobilityForces);
+    const SimTK::SimbodyMatterSubsystem& matter = getModel().getMatterSubsystem();
+
+    const SimTK::Vector args = calcFunctionArguments(state);
+
+    _derivativeOrderBuffer.resize(1);
+    int nCoords = getProperty_Coordinates().size();
+    for (int i = 0; i < nCoords; ++i) {
+        const std::string& coordAbsPath = get_Coordinates(i);
+        const OpenSim::Coordinate& coord = getRoot().getComponent<OpenSim::Coordinate>(coordAbsPath);
+        _derivativeOrderBuffer[0] = i;
+        double momentArm = get_PathFunction().calcDerivative(_derivativeOrderBuffer, args);
+
+        double torque = -tension*momentArm;
+
+        matter.addInMobilityForce(state,
+                                  SimTK::MobilizedBodyIndex(coord.getBodyIndex()),
+                                  SimTK::MobilizerUIndex(coord.getMobilizerQIndex()),
+                                  torque,
+                                  mobilityForces);
+    }
 }
 
-double OpenSim::FunctionBasedPath::computeMomentArm(const SimTK::State& s, const Coordinate& aCoord) const
+double OpenSim::FunctionBasedPath::computeMomentArm(const SimTK::State& st, const Coordinate& coord) const
 {
-    return getProperty_PathFunction().getValue().computeMomentArm(s, aCoord);
+    // the moment arm of a path with respect to a coordinate is the path's
+    // length derivative with respect to the coordinate
+
+    int coordIndex = indexOfCoordinate(coord);
+    if (coordIndex == -1) {
+        // the provided coordinate does not affect this path, so it
+        // has no moment arm w.r.t. it
+        return 0.0;
+    }
+
+    _derivativeOrderBuffer.resize(1);
+    _derivativeOrderBuffer[0] = coordIndex;
+
+    const SimTK::Vector& args = calcFunctionArguments(st);
+
+    return getProperty_PathFunction().getValue().calcDerivative(_derivativeOrderBuffer, args);
+}
+
+void OpenSim::FunctionBasedPath::extendFinalizeFromProperties()
+{
+    ValidatePropertiesOrThrow(*this, getProperty_PathFunction(), getProperty_Coordinates());
 }
 
 void OpenSim::FunctionBasedPath::extendAddToSystem(SimTK::MultibodySystem& system) const
@@ -118,4 +252,56 @@ void OpenSim::FunctionBasedPath::extendInitStateFromProperties(SimTK::State& s) 
 {
     Super::extendInitStateFromProperties(s);
     markCacheVariableValid(s, _colorCV);
+}
+
+void OpenSim::FunctionBasedPath::extendFinalizeConnections(OpenSim::Component& root)
+{
+    // populate pointer-based coordinate lookups
+    //
+    // the reason this isn't done in `extendFinalizeFromProperties` is because the
+    // not-yet-property-finalized Model hasn't necessarily "connected" to the
+    // coordinates that the coordinate files refer to, so the implementation
+    // can't lookup the `OpenSim::Coordinate*` pointers during that phase
+
+    // Allow (model) component to include its own subcomponents
+    // before calling the base method which automatically invokes
+    // connect all the subcomponents.
+    {
+        Model* model = dynamic_cast<Model*>(&root);
+        if (model) {
+            connectToModel(*model);
+        }
+    }
+
+    int nCoords = getProperty_Coordinates().size();
+    for (int i = 0; i < nCoords; ++i) {
+        root.getComponent(get_Coordinates(i));  // should throw if missing
+    }
+}
+
+const SimTK::Vector& OpenSim::FunctionBasedPath::calcFunctionArguments(const SimTK::State& st) const
+{
+    int nargs = getProperty_Coordinates().size();
+    _functionArgsBuffer.resize(nargs);
+    for (int i = 0; i < nargs; ++i) {
+        // HACK: this lookup is horrible
+        const std::string& coordName = get_Coordinates(i);
+        const OpenSim::Coordinate& coord = getRoot().getComponent<OpenSim::Coordinate>(coordName);
+        _functionArgsBuffer[i] = coord.getValue(st);
+    }
+    return _functionArgsBuffer;
+}
+
+int OpenSim::FunctionBasedPath::indexOfCoordinate(const Coordinate& c) const
+{
+    std::string absPath = c.getAbsolutePathString();
+
+    int nCoords = getProperty_Coordinates().size();
+    for (int i = 0; i < nCoords; ++i) {
+        const std::string& coordAbsPath = get_Coordinates(i);
+        if (coordAbsPath == absPath) {
+            return i;
+        }
+    }
+    return -1;
 }

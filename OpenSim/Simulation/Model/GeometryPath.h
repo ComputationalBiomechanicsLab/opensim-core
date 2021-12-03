@@ -96,11 +96,9 @@ private:
 public:
     GeometryPath();
     GeometryPath(const GeometryPath&);
-    GeometryPath(GeometryPath&&) noexcept;
     ~GeometryPath() noexcept;
 
     GeometryPath& operator=(const GeometryPath&);
-    GeometryPath& operator=(GeometryPath&&) noexcept;
 
 
     // INTERFACE METHODS

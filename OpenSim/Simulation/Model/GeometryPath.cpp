@@ -105,13 +105,9 @@ OpenSim::GeometryPath::GeometryPath() : ModelComponent{}, _impl{new Impl{}}
 
 OpenSim::GeometryPath::GeometryPath(OpenSim::GeometryPath const&) = default;
 
-OpenSim::GeometryPath::GeometryPath(OpenSim::GeometryPath&&) noexcept = default;
-
 OpenSim::GeometryPath::~GeometryPath() noexcept = default;
 
 OpenSim::GeometryPath& OpenSim::GeometryPath::operator=(const GeometryPath&) = default;
-
-OpenSim::GeometryPath& OpenSim::GeometryPath::operator=(GeometryPath&&) noexcept = default;
 
 
 // DEFAULTED METHODS
