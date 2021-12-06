@@ -861,10 +861,11 @@ namespace joris {
     //     https://arxiv.org/abs/0905.3564
     //
     // `xVals` are the current values of each dimension (independent var: e.g. coordinate values - the "x"es)
-    double Impl_ComputeValue(
+    double Impl_ComputeValueOrDeriv(
             const std::vector<Discretization>& fittingDiscretizations,
             const std::vector<double>& fittingEvals,
-            const SimTK::Vector& xVals)
+            const SimTK::Vector& xVals,
+            int derivIndex = -1)
     {
         SimTK_ASSERT_ALWAYS(!fittingDiscretizations.empty(), "this implementation requires that at least one X (e.g. coordinate) affects the path");
         SimTK_ASSERT_ALWAYS(xVals.size() == static_cast<int>(fittingDiscretizations.size()), "You must call this function with the correct number of (precomputed) x values");
@@ -881,7 +882,7 @@ namespace joris {
         for (int dim = 0; dim < xVals.size(); ++dim) {
             std::pair<int, double> wholeFrac = splitIntoWholeAndFractionalForBetaCalc(fittingDiscretizations[dim], xVals[dim]);
             closestDiscretizationSteps[dim] = wholeFrac.first;
-            betas[dim] = ComputeBeta(wholeFrac.second);
+            betas[dim] = dim != derivIndex ? ComputeBeta(wholeFrac.second) : ComputeBetaDerivative(wholeFrac.second);
         }
 
         // for each dim, permute through 4 (discretized) locations *around* the x location:
@@ -922,6 +923,10 @@ namespace joris {
 
         double z = 0.0;  // result
         int cnt = 0;  // sanity-check counter
+
+        // seems to be used in original implementation to scale the eval step size in the deriv calculation specifically
+        double evalScaler = derivIndex == -1 ? 1.0 : 1.0/stepSize(fittingDiscretizations[derivIndex]);
+
         while (dimIdxOffsets[0] < 3) {
 
             // compute `beta` (weighted coefficient per dimension) for this particular
@@ -949,113 +954,7 @@ namespace joris {
 
             // equivalent to z += b*v, but handles rounding errors when the rhs
             // is very small
-            z = std::fma(beta, fittingEvals.at(idxInFittingEvals), z);
-
-            // increment the offsets
-            //
-            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
-            {
-                int pos = xVals.size()-1;
-                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
-                    dimIdxOffsets[pos] = -1;  // overflow
-                    ++dimIdxOffsets[pos-1];  // carry propagation
-                    --pos;
-                }
-            }
-
-            ++cnt;
-        }
-
-        // sanity check: is `z` accumulated from the expected number of iterations?
-        {
-            int expectedIterations = 1 << (2*xVals.size());
-            if (cnt != expectedIterations) {
-                std::stringstream msg;
-                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
-                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-            }
-        }
-
-        return z;
-    }
-
-    // computes the Y derivative for a given petmuation of input X values
-    double Impl_ComputeDeriv(
-            const std::vector<Discretization>& fittingDiscretizations,
-            const std::vector<double>& fittingEvals,
-            const SimTK::Vector& xVals,
-            int dimToDifferentiateIdx)
-    {
-        SimTK_ASSERT_ALWAYS(!fittingDiscretizations.empty(), "this implementation requires that at least one X (e.g. coordinate) dimension has been fitted");
-        SimTK_ASSERT_ALWAYS(xVals.size() == static_cast<int>(fittingDiscretizations.size()), "You must call this function with the correct number of (precomputed) x values (i.e. the same number that were fitted against)");
-        SimTK_ASSERT_ALWAYS(xVals.size() < static_cast<int>(g_MaxNumDimensions), "too many dimensions in this fit - the implementation cannot handle this many");
-
-        // compute:
-        //
-        // - the index of the first discretization step *before* the input value
-        //
-        // - the polynomial of the curve at that step, given its fractional distance
-        //   toward the next step
-        using Polynomial = std::array<double, 4>;
-        std::array<int, g_MaxNumDimensions> closestDiscretizationSteps;
-        std::array<Polynomial, g_MaxNumDimensions> betas;
-        for (int dim = 0; dim < xVals.size(); ++dim) {
-            std::pair<int, double> wholeFrac = splitIntoWholeAndFractionalForBetaCalc(fittingDiscretizations[dim], xVals[dim]);
-            closestDiscretizationSteps[dim] = wholeFrac.first;
-            betas[dim] = dim != dimToDifferentiateIdx ? ComputeBeta(wholeFrac.second) : ComputeBetaDerivative(wholeFrac.second);
-        }
-
-        std::array<int, g_MaxNumDimensions> dimIdxOffsets;
-        for (int dim = 0; dim < xVals.size(); ++dim) {
-            dimIdxOffsets[dim] = -1;
-        }
-
-        // permute through all locations around the input value
-        //
-        // e.g. the location permutations for 3 dims iterate like this for each
-        //      crank of the loop
-        //
-        //     [-1, -1, -1]
-        //     [-1, -1,  0]
-        //     [-1, -1,  1]
-        //     [-1, -1,  2]
-        //     [-1,  0, -1]
-        //     ...(4^3 steps total)...
-        //     [ 2,  2,  1]
-        //     [ 2,  2,  2]
-        //     [ 3,  0,  0]   (the termination condition)
-
-        double z = 0.0;  // result
-        int cnt = 0;  // sanity-check counter
-        while (dimIdxOffsets[0] < 3) {
-
-            // compute `beta` (weighted coefficient per dimension) for this particular
-            // permutation's x locations (e.g. -1, 0, 0, 2) and figure out
-            // what the closest input value was at the weighted location. Add the
-            // result the the output
-
-            double beta = 1.0;
-            int strideInFittingEvals = 1;
-            int idxInFittingEvals = 0;
-
-            // go backwards, from least-significant dim (highest idx) to figure
-            // out where the evaluation is in the fittingEvals array
-            //
-            // this is so that we can compute the stride as the algorithm runs
-            for (int coord = xVals.size()-1; coord >= 0; --coord) {
-                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
-                int closestStep = closestDiscretizationSteps[coord];
-                int step = closestStep + offset;
-
-                beta *= betas[coord][offset+1];  // index into the polynomial
-                idxInFittingEvals += strideInFittingEvals * step;
-                strideInFittingEvals *= fittingDiscretizations[coord].nPoints;
-            }
-
-            // equivalent to z += b*v, but handles rounding errors when the rhs
-            // is very small
-            z = std::fma(beta, fittingEvals.at(idxInFittingEvals), z);
+            z = std::fma(beta, evalScaler * fittingEvals.at(idxInFittingEvals), z);
 
             // increment the offsets
             //
@@ -1097,6 +996,7 @@ namespace joris {
 // wireup of core runtime algorithm to OpenSim
 namespace joris {
 
+    // the underlying SimTK::Function that actually calls into the function
     class JorisPathSimTKFunction : public SimTK::Function {
         std::shared_ptr<std::vector<Discretization>> _discretizations;
         std::shared_ptr<std::vector<double>> _evaluations;
@@ -1111,13 +1011,13 @@ namespace joris {
 
         double calcValue(const SimTK::Vector& coordVals) const override
         {
-            return Impl_ComputeValue(*_discretizations, *_evaluations, coordVals);
+            return Impl_ComputeValueOrDeriv(*_discretizations, *_evaluations, coordVals);
         }
 
         double calcDerivative(const SimTK::Array_<int>& derivComponents, const SimTK::Vector& coordVals) const override
         {
             SimTK_ASSERT_ALWAYS(derivComponents.size() == 1, "Can only find first-order derivative w.r.t. one coord");
-            return Impl_ComputeDeriv(*_discretizations, *_evaluations, coordVals, derivComponents[0]);
+            return Impl_ComputeValueOrDeriv(*_discretizations, *_evaluations, coordVals, derivComponents[0]);
         }
 
         int getArgumentSize() const override
@@ -1181,7 +1081,7 @@ namespace joris {
             return new JorisPathSimTKFunction{_discretizations, _evaluations};
         }
 
-        // TODO: flash vectors from properties
+        // TODO: flash vectors from properties with `extendFinalizeFromProperties`
     };
 
     /** TODO: handle computing a fresh FBP from a PBP, flashing from props, etc.
@@ -1236,7 +1136,7 @@ namespace joris {
 }
 
 
-// TODO: code that compiles a new "FunctionBasedPath" that uses Joris's alg
+// TODO: code that compiles a new "FunctionBasedPath" from a "PointBasedPath"
 namespace joris {
     static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxNumDimensions);
     static constexpr int g_NumProbingDiscretizationsDefault = 8;
