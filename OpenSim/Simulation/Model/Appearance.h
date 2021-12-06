@@ -28,6 +28,7 @@
 #include <OpenSim/Simulation/osimSimulationDLL.h>
 #include <OpenSim/Common/Object.h>
 #include <OpenSim/Common/XMLDocument.h>
+#include <simbody/internal/Visualizer.h>
 
 namespace OpenSim {
 
