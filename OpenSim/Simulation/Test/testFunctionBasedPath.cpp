@@ -631,9 +631,11 @@ OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedUsesUnderlyingFunctionCalcValue)
 
 OSIM_TEST(FunctionBasedPath, GetLengtheningSpeedIsCached)
 {
-    // the FunctionBasedPath ultimately calculates its lengthening speed
-    // by using the underlying Function object, rather than computing it
-    // itself
+    // FunctionBasedPath::getLengtheningSpeed should be "cached", depending on
+    // the simulation stage.
+    //
+    // this is an implementation detail that's good for implementors to know. Remove
+    // this test if it's a bad assumption.
 
     ModelWithNCoordinates m = GenerateModelWithNCoordinates(1);
 
@@ -751,16 +753,492 @@ OSIM_TEST(FunctionBasedPath, ComputeMomentArmCallsCalcDerivOfFunction)
     SimTK_TEST(momentArm == fn.m_SharedData->derivative);
 }
 
+
+
+
 // HACK: test Joris's implementation here
-//
-// this is because I cba'd splitting OSIM_TEST into another compilation unit, and because
-// it's currently handy to have all this code in one unit while we flesh out the implementation
 
 #include <OpenSim/Simulation/Model/PointBasedPath.h>
 
+
+// core runtime algorithm
 namespace joris {
-    static constexpr size_t g_MaxCoordsThatCanBeInterpolated = 8;  // important: this is an upper limit that's used for stack allocations
-    static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxCoordsThatCanBeInterpolated);
+
+    static constexpr size_t g_MaxNumDimensions = 8;  // important: this is an upper limit that's used for stack allocations
+
+    // an `nPoints` evenly-spaced discretization of the range [begin, end] (inclusive)
+    //
+    // e.g. [0, 10], 0 points == [], step size = 10
+    //             , 1 point  == [0], step size = 10
+    //             , 2 points == [0, 10], step size = 10
+    //             , 3 points == [0, 5, 10], step size = 5
+    //             , 4 points == [0, 3.33, 6.66, 10], step size = 3.33
+    struct Discretization final {
+        double begin;
+        double end;
+        int nPoints;
+    };
+
+    double stepSize(const Discretization& d)
+    {
+        double diff = d.end - d.begin;
+        return d.nPoints <= 2 ? diff : diff/(d.nPoints-1);
+    }
+
+    double realIndexOf(const Discretization& d, double v)
+    {
+        // solve: `x = d.begin + stepSize(d)*n` for `n`
+        return (v - d.begin) / stepSize(d);
+    }
+
+    std::pair<int, double> splitIntoWholeAndFractional(double v)
+    {
+        double wholePart;
+        double fractionalPart = std::modf(v, &wholePart);
+        return {static_cast<int>(wholePart), fractionalPart};
+    }
+
+    std::pair<int, double> splitIntoWholeAndFractionalForBetaCalc(const Discretization& d, double x)
+    {
+        std::pair<int, double> wholeAndFrac = splitIntoWholeAndFractional(realIndexOf(d, x));
+
+        if (wholeAndFrac.first < 1) {
+            // edge-case: x is below the second graduation, use the 2nd discretization to ensure the fitting
+            // impl has access to all 4 (1 before, 2 after) datapoints
+            return {1, 0.0};
+        } else if (wholeAndFrac.first > d.nPoints-3) {
+            // edge-case: x is greater than the third-to-last graduation, use the third-to-last discretization
+            // to ensurethe fitting impl. has asscess to all 4 (1 before, 2 after) datapoints
+            return {d.nPoints-3, 0.0};
+        } else {
+            return wholeAndFrac;
+        }
+    }
+
+    using Polynomial = std::array<double, 4>;
+
+    Polynomial ComputeBeta(double frac)
+    {
+        // compute polynomial based on fraction the point is toward the next point
+
+        double frac2 = frac*frac;
+        double frac3 = frac2*frac;
+        double frac4 = frac3*frac;
+        double fracMinusOne = frac - 1;
+        double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
+
+        Polynomial p;
+        p[0] =  0.5 * fracMinusOne3 * frac*(2.0*frac + 1.0);
+        p[1] = -0.5 * fracMinusOne  * (6.0*frac4 - 9.0*frac3 + 2.0*frac + 2.0);
+        p[2] =  0.5 * frac          * (6.0*frac4 - 15.0*frac3 + 9.0*frac2 + frac + 1.0);
+        p[3] = -0.5 * fracMinusOne  * frac3*(2.0*frac - 3.0);
+
+        return p;
+    }
+
+    Polynomial ComputeBetaDerivative(double frac)
+    {
+        // compute polynomial derivative based on fraction the point is toward the next point
+
+        double frac2 = frac*frac;
+        double frac3 = frac2*frac;
+        double frac4 = frac3*frac;
+
+        Polynomial p;
+        p[0] = 5*frac4 - 10*frac3 + 4.5*frac2 + frac - 0.5;
+        p[1] = -15*frac4 + 30*frac3 - 13.5*frac2 - 2*frac;
+        p[2] = 15*frac4 - 30*frac3 + 13.5*frac2 + frac + 0.5;
+        p[3] = frac2*(-5*frac2 + 10*frac - 4.5);
+        return p;
+    }
+
+    // computes the interpolated Y value for a given permutation of X values
+    //
+    // this is the "heart" of the FPB algorithm. It's loosely based on the algorithm
+    // described here:
+    //
+    //     "Two hierarchies of spline interpolations. Practical algorithms for multivariate higher order splines"
+    //     https://arxiv.org/abs/0905.3564
+    //
+    // `xVals` are the current values of each dimension (independent var: e.g. coordinate values - the "x"es)
+    double Impl_ComputeValue(
+            const std::vector<Discretization>& fittingDiscretizations,
+            const std::vector<double>& fittingEvals,
+            const SimTK::Vector& xVals)
+    {
+        SimTK_ASSERT_ALWAYS(!fittingDiscretizations.empty(), "this implementation requires that at least one X (e.g. coordinate) affects the path");
+        SimTK_ASSERT_ALWAYS(xVals.size() == static_cast<int>(fittingDiscretizations.size()), "You must call this function with the correct number of (precomputed) x values");
+        SimTK_ASSERT_ALWAYS(xVals.size() < static_cast<int>(g_MaxNumDimensions), "too many dimensions in this fit - the implementation cannot handle this many");
+
+        // compute:
+        //
+        // - the index of the first discretization step *before* the input value
+        //
+        // - the polynomial of the curve at that step, given its fractional distance
+        //   toward the next step
+        std::array<int, g_MaxNumDimensions> closestDiscretizationSteps;
+        std::array<Polynomial, g_MaxNumDimensions> betas;
+        for (int dim = 0; dim < xVals.size(); ++dim) {
+            std::pair<int, double> wholeFrac = splitIntoWholeAndFractionalForBetaCalc(fittingDiscretizations[dim], xVals[dim]);
+            closestDiscretizationSteps[dim] = wholeFrac.first;
+            betas[dim] = ComputeBeta(wholeFrac.second);
+        }
+
+        // for each dim, permute through 4 (discretized) locations *around* the x location:
+        //
+        // - A one step before B
+        // - B the first discretization step before the input value
+        // - C one step after B
+        // - D one step after C
+        //
+        // where:
+        //
+        // - betas are coefficients that affect each location. beta[0] affects A,
+        //   betas[1] affects B, betas[2] affects C, and betas[3] affects D
+
+        // represent permuting through each location around each x as a sequence
+        // of integer offsets that can be -1, 0, 1, or 2
+        //
+        // the algorithm increments this array as it goes through each permutation
+        std::array<int, g_MaxNumDimensions> dimIdxOffsets;
+        for (int dim = 0; dim < xVals.size(); ++dim) {
+            dimIdxOffsets[dim] = -1;
+        }
+
+        // permute through all locations around the input value
+        //
+        // e.g. the location permutations for 3 dims iterate like this for each
+        //      crank of the loop
+        //
+        //     [-1, -1, -1]
+        //     [-1, -1,  0]
+        //     [-1, -1,  1]
+        //     [-1, -1,  2]
+        //     [-1,  0, -1]
+        //     ...(4^3 steps total)...
+        //     [ 2,  2,  1]
+        //     [ 2,  2,  2]
+        //     [ 3,  0,  0]   (the termination condition)
+
+        double z = 0.0;  // result
+        int cnt = 0;  // sanity-check counter
+        while (dimIdxOffsets[0] < 3) {
+
+            // compute `beta` (weighted coefficient per dimension) for this particular
+            // permutation's x locations (e.g. -1, 0, 0, 2) and figure out
+            // what the closest input value was at the weighted location. Add the
+            // result the the output
+
+            double beta = 1.0;
+            int strideInFittingEvals = 1;
+            int idxInFittingEvals = 0;
+
+            // go backwards, from least-significant dim (highest idx) to figure
+            // out where the evaluation is in the fittingEvals array
+            //
+            // this is so that we can compute the stride as the algorithm runs
+            for (int coord = xVals.size()-1; coord >= 0; --coord) {
+                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
+                int closestStep = closestDiscretizationSteps[coord];
+                int step = closestStep + offset;
+
+                beta *= betas[coord][offset+1];  // index into the polynomial
+                idxInFittingEvals += strideInFittingEvals * step;
+                strideInFittingEvals *= fittingDiscretizations[coord].nPoints;
+            }
+
+            // equivalent to z += b*v, but handles rounding errors when the rhs
+            // is very small
+            z = std::fma(beta, fittingEvals.at(idxInFittingEvals), z);
+
+            // increment the offsets
+            //
+            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
+            {
+                int pos = xVals.size()-1;
+                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
+                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                    dimIdxOffsets[pos] = -1;  // overflow
+                    ++dimIdxOffsets[pos-1];  // carry propagation
+                    --pos;
+                }
+            }
+
+            ++cnt;
+        }
+
+        // sanity check: is `z` accumulated from the expected number of iterations?
+        {
+            int expectedIterations = 1 << (2*xVals.size());
+            if (cnt != expectedIterations) {
+                std::stringstream msg;
+                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
+            }
+        }
+
+        return z;
+    }
+
+    // computes the Y derivative for a given petmuation of input X values
+    double Impl_ComputeDeriv(
+            const std::vector<Discretization>& fittingDiscretizations,
+            const std::vector<double>& fittingEvals,
+            const SimTK::Vector& xVals,
+            int dimToDifferentiateIdx)
+    {
+        SimTK_ASSERT_ALWAYS(!fittingDiscretizations.empty(), "this implementation requires that at least one X (e.g. coordinate) dimension has been fitted");
+        SimTK_ASSERT_ALWAYS(xVals.size() == static_cast<int>(fittingDiscretizations.size()), "You must call this function with the correct number of (precomputed) x values (i.e. the same number that were fitted against)");
+        SimTK_ASSERT_ALWAYS(xVals.size() < static_cast<int>(g_MaxNumDimensions), "too many dimensions in this fit - the implementation cannot handle this many");
+
+        // compute:
+        //
+        // - the index of the first discretization step *before* the input value
+        //
+        // - the polynomial of the curve at that step, given its fractional distance
+        //   toward the next step
+        using Polynomial = std::array<double, 4>;
+        std::array<int, g_MaxNumDimensions> closestDiscretizationSteps;
+        std::array<Polynomial, g_MaxNumDimensions> betas;
+        for (int dim = 0; dim < xVals.size(); ++dim) {
+            std::pair<int, double> wholeFrac = splitIntoWholeAndFractionalForBetaCalc(fittingDiscretizations[dim], xVals[dim]);
+            closestDiscretizationSteps[dim] = wholeFrac.first;
+            betas[dim] = dim != dimToDifferentiateIdx ? ComputeBeta(wholeFrac.second) : ComputeBetaDerivative(wholeFrac.second);
+        }
+
+        std::array<int, g_MaxNumDimensions> dimIdxOffsets;
+        for (int dim = 0; dim < xVals.size(); ++dim) {
+            dimIdxOffsets[dim] = -1;
+        }
+
+        // permute through all locations around the input value
+        //
+        // e.g. the location permutations for 3 dims iterate like this for each
+        //      crank of the loop
+        //
+        //     [-1, -1, -1]
+        //     [-1, -1,  0]
+        //     [-1, -1,  1]
+        //     [-1, -1,  2]
+        //     [-1,  0, -1]
+        //     ...(4^3 steps total)...
+        //     [ 2,  2,  1]
+        //     [ 2,  2,  2]
+        //     [ 3,  0,  0]   (the termination condition)
+
+        double z = 0.0;  // result
+        int cnt = 0;  // sanity-check counter
+        while (dimIdxOffsets[0] < 3) {
+
+            // compute `beta` (weighted coefficient per dimension) for this particular
+            // permutation's x locations (e.g. -1, 0, 0, 2) and figure out
+            // what the closest input value was at the weighted location. Add the
+            // result the the output
+
+            double beta = 1.0;
+            int strideInFittingEvals = 1;
+            int idxInFittingEvals = 0;
+
+            // go backwards, from least-significant dim (highest idx) to figure
+            // out where the evaluation is in the fittingEvals array
+            //
+            // this is so that we can compute the stride as the algorithm runs
+            for (int coord = xVals.size()-1; coord >= 0; --coord) {
+                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
+                int closestStep = closestDiscretizationSteps[coord];
+                int step = closestStep + offset;
+
+                beta *= betas[coord][offset+1];  // index into the polynomial
+                idxInFittingEvals += strideInFittingEvals * step;
+                strideInFittingEvals *= fittingDiscretizations[coord].nPoints;
+            }
+
+            // equivalent to z += b*v, but handles rounding errors when the rhs
+            // is very small
+            z = std::fma(beta, fittingEvals.at(idxInFittingEvals), z);
+
+            // increment the offsets
+            //
+            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
+            {
+                int pos = xVals.size()-1;
+                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
+                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
+                    dimIdxOffsets[pos] = -1;  // overflow
+                    ++dimIdxOffsets[pos-1];  // carry propagation
+                    --pos;
+                }
+            }
+
+            ++cnt;
+        }
+
+        // sanity check: is `z` accumulated from the expected number of iterations?
+        {
+            int expectedIterations = 1 << (2*xVals.size());
+            if (cnt != expectedIterations) {
+                std::stringstream msg;
+                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
+                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
+            }
+        }
+
+        return z;
+    }
+}
+
+
+// TODO: test the low-level algorithm by providing it low-level data etc
+namespace joris {
+
+}
+
+
+// wireup of core runtime algorithm to OpenSim
+namespace joris {
+
+    class JorisPathSimTKFunction : public SimTK::Function {
+        std::shared_ptr<std::vector<Discretization>> _discretizations;
+        std::shared_ptr<std::vector<double>> _evaluations;
+    public:
+        JorisPathSimTKFunction(
+                std::shared_ptr<std::vector<Discretization>> discretizations,
+                std::shared_ptr<std::vector<double>> evaluations) :
+            _discretizations{std::move(discretizations)},
+            _evaluations{std::move(evaluations)}
+        {
+        }
+
+        double calcValue(const SimTK::Vector& coordVals) const override
+        {
+            return Impl_ComputeValue(*_discretizations, *_evaluations, coordVals);
+        }
+
+        double calcDerivative(const SimTK::Array_<int>& derivComponents, const SimTK::Vector& coordVals) const override
+        {
+            SimTK_ASSERT_ALWAYS(derivComponents.size() == 1, "Can only find first-order derivative w.r.t. one coord");
+            return Impl_ComputeDeriv(*_discretizations, *_evaluations, coordVals, derivComponents[0]);
+        }
+
+        int getArgumentSize() const override
+        {
+            return static_cast<int>(_discretizations->size());
+        }
+
+        int getMaxDerivativeOrder() const override
+        {
+            return 1;
+        }
+    };
+
+    using namespace OpenSim;  // required by the property macros...
+
+    class FunctionBasedPathDiscretization : public OpenSim::Component {
+        OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretization, OpenSim::Component);
+
+    public:
+        OpenSim_DECLARE_PROPERTY(coordinate_abspath, std::string, "The absolute path, in the model, to the OpenSim::Coordinate that this discretization was produced from");
+        OpenSim_DECLARE_PROPERTY(x_begin, double, "The lowest OpenSim::Coordinate value that was used for discretization");
+        OpenSim_DECLARE_PROPERTY(x_end, double, "The highest OpenSim:::Coordinate value that was used for discretization");
+        OpenSim_DECLARE_PROPERTY(num_points, int, "The number of evenly-spaced OpenSim::Coordinate values between [x_begin, x_end] (inclusive) that were used for discretization of the OpenSim::Coordinate. E.g. [x_begin, 1*(x_begin+((x_end-x_begin)/3)), 2*(x_begin+((x_end-x_begin)/3)), x_end]");
+
+        FunctionBasedPathDiscretization()
+        {
+            constructProperty_coordinate_abspath("");
+            constructProperty_x_begin(0.0);
+            constructProperty_x_end(0.0);
+            constructProperty_num_points(0);
+        }
+    };
+
+    class FunctionBasedPathDiscretizationSet : public OpenSim::Set<FunctionBasedPathDiscretization> {
+        OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretizationSet, OpenSim::Set<FunctionBasedPathDiscretization>);
+    };
+
+    class JorisPathFunction final : public OpenSim::Function {
+        OpenSim_DECLARE_CONCRETE_OBJECT(JorisPathFunction, OpenSim::Function);
+        // TODO: this needs to have PROPERTYs to store the discretizations + evaluations
+    public:
+        std::shared_ptr<std::vector<Discretization>> _discretizations;
+        std::shared_ptr<std::vector<double>> _evaluations;
+    public:
+        JorisPathFunction() :
+            _discretizations{std::make_shared<std::vector<Discretization>>()},
+            _evaluations{std::make_shared<std::vector<double>>()}
+        {
+        }
+
+        JorisPathFunction(
+                std::shared_ptr<std::vector<Discretization>> discretizations,
+                std::shared_ptr<std::vector<double>> evaluations) :
+            _discretizations{std::move(discretizations)},
+            _evaluations{std::move(evaluations)}
+        {
+        }
+
+        SimTK::Function* createSimTKFunction() const override
+        {
+            return new JorisPathSimTKFunction{_discretizations, _evaluations};
+        }
+
+        // TODO: flash vectors from properties
+    };
+
+    /** TODO: handle computing a fresh FBP from a PBP, flashing from props, etc.
+
+    // init underlying implementation data from a `FunctionBasedPath`s (precomputed) properties
+    //
+    // the properties being set in the FBP usually implies that the FBP has already been built
+    // from a PBP at some previous point in time
+    void Impl_InitFromFBPProperties(JorisFBP& impl)
+    {
+        FunctionBasedPathDiscretizationSet const& discSet = impl.getProperty_FunctionBasedPathDiscretizationSet().getValue();
+
+        // set `coords` pointers to null
+        //
+        // they are lazily looked up in a later phase (after the model is connected up)
+        impl.coords.clear();
+        impl.coords.resize(discSet.getSize(), nullptr);
+
+        // set `coordAbsPaths` from discretizations property
+        impl.coordAbsPaths.clear();
+        impl.coordAbsPaths.reserve(discSet.getSize());
+        for (int i = 0; i < discSet.getSize(); ++i) {
+            impl.coordAbsPaths.push_back(discSet[i].getProperty_coordinate_abspath().getValue());
+        }
+
+        // set `discretizations` from discretizations property
+        impl.discretizations.clear();
+        impl.discretizations.reserve(discSet.getSize());
+        for (int i = 0; i < discSet.getSize(); ++i) {
+            FunctionBasedPathDiscretization const& disc = discSet[i];
+            Discretization d;
+            d.begin = disc.getProperty_x_begin().getValue();
+            d.end = disc.getProperty_x_end().getValue();
+            d.nsteps = disc.getProperty_num_points().getValue();
+            impl.discretizations.push_back(d);
+        }
+
+        // set `evals` from evaluations property
+        auto const& evalsProp = impl.getProperty_Evaluations();
+        impl.evals.clear();
+        impl.evals.reserve(evalsProp.size());
+        for (int i = 0; i < evalsProp.size(); ++i) {
+            impl.evals.push_back(evalsProp.getValue(i));
+        }
+    }
+    */
+}
+
+
+// TODO: integration test that quickly ensures the wireup is using Joris's alg
+namespace joris {
+}
+
+
+// TODO: code that compiles a new "FunctionBasedPath" that uses Joris's alg
+namespace joris {
+    static constexpr int g_MaxCoordsThatCanAffectPathDefault = static_cast<int>(g_MaxNumDimensions);
     static constexpr int g_NumProbingDiscretizationsDefault = 8;
     static constexpr double g_MinProbingMomentArmChangeDefault = 0.001;
     static constexpr int g_NumDiscretizationStepsPerDimensionDefault = 8;
@@ -828,15 +1306,6 @@ namespace joris {
         return rv;
     }
 
-    // discretization of a particular coordinate
-    //
-    // assumes `nsteps` evenly-spaced points ranging from [begin, end] (inclusive)
-    struct Discretization final {
-        double begin;
-        double end;
-        int nsteps;
-    };
-
     // compute ideal discretization of the given coordinate
     Discretization discretizationForCoord(OpenSim::Coordinate const& c, int numDiscretizationSteps)
     {
@@ -847,14 +1316,14 @@ namespace joris {
         //d.end = static_cast<double>(SimTK_PI)/2;
         d.begin = std::max(c.getRangeMin(), -static_cast<double>(SimTK_PI));
         d.end = std::min(c.getRangeMax(), static_cast<double>(SimTK_PI));
-        d.nsteps = numDiscretizationSteps - 3;
-        double step = (d.end-d.begin) / (d.nsteps-1);
+        d.nPoints = numDiscretizationSteps - 3;
+        double step = stepSize(d);
 
         // expand range slightly in either direction to ensure interpolation is
         // clean around the edges
         d.begin -= step;
         d.end += 2.0 * step;
-        d.nsteps += 3;
+        d.nPoints += 3;
 
         return d;
     }
@@ -885,26 +1354,26 @@ namespace joris {
             return rv;
         }
 
-        OPENSIM_THROW_IF(ncoords > g_MaxCoordsThatCanBeInterpolated, OpenSim::Exception, "too many coordinates affect this path - the FunctionBasedPath implementation cannot handle this");
+        OPENSIM_THROW_IF(ncoords > g_MaxNumDimensions, OpenSim::Exception, "too many coordinates affect this path - the FunctionBasedPath implementation cannot handle this");
 
         // number of evaluations is the total number of permutations of all dimensions for
         // all discretizations
         int expectedEvals = 1;
         for (size_t i = 0; i < ncoords; ++i) {
-            expectedEvals *= discs[i].nsteps;
+            expectedEvals *= discs[i].nPoints;
         }
         rv.reserve(expectedEvals);
 
         // holds which "step" in each Coordinate's [begin, end] discretization we
         // have evaluated up to
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> discStepIdx{};
-        while (discStepIdx[0] < discs[0].nsteps) {
+        std::array<int, g_MaxNumDimensions> discStepIdx{};
+        while (discStepIdx[0] < discs[0].nPoints) {
 
             // set all coordinate values for this step
             for (size_t coord = 0; coord < ncoords; ++coord) {
                 Discretization const& discr = discs[coord];
 
-                double stepSz = (discr.end - discr.begin) / (discr.nsteps - 1);
+                double stepSz = stepSize(discr);
                 int step = discStepIdx[coord];
                 double val =  discr.begin + step*stepSz;
 
@@ -923,14 +1392,14 @@ namespace joris {
             // "carry propagation" to the "more significant" coordinates
             int pos = ncoords - 1;
             discStepIdx[pos]++;
-            while (pos > 0 && discStepIdx[pos] >= discs[pos].nsteps) {
+            while (pos > 0 && discStepIdx[pos] >= discs[pos].nPoints) {
                 discStepIdx[pos] = 0;  // overflow
                 ++discStepIdx[pos-1];  // carry
                 --pos;
             }
         }
 
-        SimTK_ASSERT_ALWAYS(discStepIdx[0] == discs[0].nsteps, "should be true, after the final overflow");
+        SimTK_ASSERT_ALWAYS(discStepIdx[0] == discs[0].nPoints, "should be true, after the final overflow");
         for (size_t i = 1; i < discStepIdx.size(); ++i) {
             SimTK_ASSERT_ALWAYS(discStepIdx[i] == 0, "these less-significant coordinates should all be overflow-n by the end of the alg");
         }
@@ -938,381 +1407,6 @@ namespace joris {
 
         return rv;
     }
-
-    using namespace OpenSim;  // required by the property macros...
-
-    class FunctionBasedPathDiscretization : public OpenSim::Component {
-        OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretization, OpenSim::Component);
-
-    public:
-        OpenSim_DECLARE_PROPERTY(coordinate_abspath, std::string, "The absolute path, in the model, to the OpenSim::Coordinate that this discretization was produced from");
-        OpenSim_DECLARE_PROPERTY(x_begin, double, "The lowest OpenSim::Coordinate value that was used for discretization");
-        OpenSim_DECLARE_PROPERTY(x_end, double, "The highest OpenSim:::Coordinate value that was used for discretization");
-        OpenSim_DECLARE_PROPERTY(num_points, int, "The number of evenly-spaced OpenSim::Coordinate values between [x_begin, x_end] (inclusive) that were used for discretization of the OpenSim::Coordinate. E.g. [x_begin, 1*(x_begin+((x_end-x_begin)/3)), 2*(x_begin+((x_end-x_begin)/3)), x_end]");
-
-        FunctionBasedPathDiscretization()
-        {
-            constructProperty_coordinate_abspath("");
-            constructProperty_x_begin(0.0);
-            constructProperty_x_end(0.0);
-            constructProperty_num_points(0);
-        }
-    };
-
-    // returns interpolated path length for a given permutation of coordinate
-    // values
-    //
-    // this is the "heart" of the FPB algorithm. It's loosely based on the algorithm
-    // described here:
-    //
-    //     "Two hierarchies of spline interpolations. Practical algorithms for multivariate higher order splines"
-    //     https://arxiv.org/abs/0905.3564
-    //
-    // `inputVals` points to a sequence of `nCoords` values that were probably
-    // retrieved via `Coordinate::getValue(SimTK::State const&)`. The reason
-    // that `inputVals` is provided externally (rather than have this implementation
-    // handle calling `getValue`) is because derivative calculations need to fiddle
-    // the input values slightly
-    double Impl_GetPathLength(
-            const std::vector<Discretization>& discretizations,
-            const std::vector<double>& evals,
-            const SimTK::Vector& coordVals)
-    {
-        SimTK_ASSERT_ALWAYS(!discretizations.empty(), "FBPs require at least one coordinate to affect the path");
-        SimTK_ASSERT_ALWAYS(coordVals.size() == static_cast<int>(discretizations.size()), "You must call this function with the correct number of (precomputed) coordinate values");
-
-        // compute:
-        //
-        // - the index of the first discretization step *before* the input value
-        //
-        // - the polynomial of the curve at that step, given its fractional distance
-        //   toward the next step
-        using Polynomial = std::array<double, 4>;
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
-        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
-        for (int coord = 0; coord < coordVals.size(); ++coord) {
-            double inputVal = coordVals[coord];
-            Discretization const& disc = discretizations[coord];
-            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
-
-            // compute index of first discretization step *before* the input value and
-            // the fraction that the input value is towards the *next* discretization step
-            int idx;
-            double frac;
-            if (inputVal < disc.begin+step) {
-                idx = 1;
-                frac = 0.0;
-            } else if (inputVal > disc.end-2*step) {
-                idx = disc.nsteps-3;
-                frac = 0.0;
-            } else {
-                // solve for `n`: inputVal = begin + n*step
-                double n = (inputVal - disc.begin) / step;
-                double wholePart;
-                double fractionalPart = std::modf(n, &wholePart);
-
-                idx = static_cast<int>(wholePart);
-                frac = fractionalPart;
-            }
-
-            // compute polynomial based on fraction the point is toward the next point
-            double frac2 = frac*frac;
-            double frac3 = frac2*frac;
-            double frac4 = frac3*frac;
-            double fracMinusOne = frac - 1;
-            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
-
-            Polynomial p;
-            p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
-            p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
-            p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
-            p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
-
-            closestDiscretizationSteps[coord] = idx;
-            betas[coord] = p;
-        }
-
-        // for each coord, permute through 4 locations *around* the input's location:
-        //
-        // - A one step before B
-        // - B the first discretization step before the input value
-        // - C one step after B
-        // - D one step after C
-        //
-        // where:
-        //
-        // - betas are coefficients that affect each location. beta[0] affects A,
-        //   betas[1] affects B, betas[2] affects C, and betas[3] affects D
-
-        // represent permuting through each location around each coordinate as a string
-        // of integer offsets that can be -1, 0, 1, or 2
-        //
-        // the algorithm increments this array as it goes through each permutation
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
-        for (int coord = 0; coord < coordVals.size(); ++coord) {
-            dimIdxOffsets[coord] = -1;
-        }
-
-        // permute through all locations around the input value
-        //
-        // e.g. the location permutations for 3 coords iterate like this for each
-        //      crank of the loop
-        //
-        //     [-1, -1, -1]
-        //     [-1, -1,  0]
-        //     [-1, -1,  1]
-        //     [-1, -1,  2]
-        //     [-1,  0, -1]
-        //     ...(4^3 steps total)...
-        //     [ 2,  2,  1]
-        //     [ 2,  2,  2]
-        //     [ 3,  0,  0]   (the termination condition)
-
-        double z = 0.0;
-        int cnt = 0;
-        while (dimIdxOffsets[0] < 3) {
-
-            // compute `beta` (weighted coefficient per coord) for this particular
-            // permutation's coordinate locations (e.g. -1, 0, 0, 2) and figure out
-            // what the closest input value was at the weighted location. Add the
-            // result the the output
-
-            double beta = 1.0;
-            int evalStride = 1;
-            int evalIdx = 0;
-
-            // go backwards, from least-significant coordinate (highest idx)
-            //
-            // this is so that we can compute the stride as the algorithm runs
-            for (int coord = coordVals.size()-1; coord >= 0; --coord) {
-                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
-                int closestStep = closestDiscretizationSteps[coord];
-                int step = closestStep + offset;
-
-                beta *= betas[coord][offset+1];
-                evalIdx += evalStride * step;
-                evalStride *= discretizations[coord].nsteps;
-            }
-
-            // equivalent to z += b*v, but handles rounding errors when the rhs
-            // is very small
-            z = std::fma(beta, evals.at(evalIdx), z);
-
-            // increment the offsets
-            //
-            // this is effectively the step that permutes [-1, -1, 2] --> [-1,  0, -1]
-            {
-                int pos = coordVals.size()-1;
-                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
-                    dimIdxOffsets[pos] = -1;  // overflow
-                    ++dimIdxOffsets[pos-1];  // carry propagation
-                    --pos;
-                }
-            }
-
-            ++cnt;
-        }
-
-        // sanity check: is `z` accumulated from the expected number of iterations?
-        {
-            int expectedIterations = 1 << (2*coordVals.size());
-            if (cnt != expectedIterations) {
-                std::stringstream msg;
-                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
-                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-            }
-        }
-
-        return z;
-    }
-
-    // get the *derivative* of the path length with respect to the given Coordinate index
-    // (in impl.coords)
-    double Impl_GetPathLengthDerivative(
-            const std::vector<Discretization>& discretizations,
-            const std::vector<double>& evals,
-            const SimTK::Vector& coordVals,
-            int coordIdx)
-    {
-        int nCoords = static_cast<int>(coordVals.size());
-
-        SimTK_ASSERT_ALWAYS(!discretizations.empty(), "FBPs require at least one coordinate to affect the path");
-        SimTK_ASSERT_ALWAYS(nCoords == static_cast<int>(discretizations.size()), "You must call this function with the correct number of (precomputed) coordinate values");
-
-        // compute:
-        //
-        // - the index of the first discretization step *before* the input value
-        //
-        // - the polynomial of the curve at that step, given its fractional distance
-        //   toward the next step
-        using Polynomial = std::array<double, 4>;
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> closestDiscretizationSteps;
-        std::array<Polynomial, g_MaxCoordsThatCanBeInterpolated> betas;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            double inputVal = coordVals[coord];
-            Discretization const& disc = discretizations[coord];
-            double step = (disc.end - disc.begin) / (disc.nsteps - 1);
-
-            // compute index of first discretization step *before* the input value and
-            // the fraction that the input value is towards the *next* discretization step
-            int idx;
-            double frac;
-            if (inputVal < disc.begin+step) {
-                idx = 1;
-                frac = 0.0;
-            } else if (inputVal > disc.end-2*step) {
-                idx = disc.nsteps-3;
-                frac = 0.0;
-            } else {
-                // solve for `n`: inputVal = begin + n*step
-                double n = (inputVal - disc.begin) / step;
-                double wholePart;
-                double fractionalPart = std::modf(n, &wholePart);
-
-                idx = static_cast<int>(wholePart);
-                frac = fractionalPart;
-            }
-
-            // compute polynomial based on fraction the point is toward the next point
-            double frac2 = frac*frac;
-            double frac3 = frac2*frac;
-            double frac4 = frac3*frac;
-            double fracMinusOne = frac - 1;
-            double fracMinusOne3 = fracMinusOne*fracMinusOne*fracMinusOne;
-
-            Polynomial p;
-            if (coord == coordIdx){
-                // derivative
-                p[0] = 5*frac4 - 10*frac3 + 4.5*frac2 + frac - 0.5;
-                p[1] = -15*frac4 + 30*frac3 - 13.5*frac2 - 2*frac;
-                p[2] = 15*frac4 - 30*frac3 + 13.5*frac2 + frac + 0.5;
-                p[3] = frac2*(-5*frac2 + 10*frac - 4.5);
-            } else {
-                // 'normal' spline function
-                p[0] =  0.5 * fracMinusOne3*frac*(2*frac + 1);
-                p[1] = -0.5 * (frac - 1)*(6*frac4 - 9*frac3 + 2*frac + 2);
-                p[2] =  0.5 * frac*(6*frac4 - 15*frac3 + 9*frac2 + frac + 1);
-                p[3] = -0.5 * (frac - 1)*frac3*(2*frac - 3);
-            }
-
-            closestDiscretizationSteps[coord] = idx;
-            betas[coord] = p;
-        }
-
-        std::array<int, g_MaxCoordsThatCanBeInterpolated> dimIdxOffsets;
-        for (int coord = 0; coord < nCoords; ++coord) {
-            dimIdxOffsets[coord] = -1;
-        }
-
-        double z = 0.0;
-        int cnt = 0;
-        while (dimIdxOffsets[0] < 3) {
-
-            double beta = 1.0;
-            int evalStride = 1;
-            int evalIdx = 0;
-
-            for (int coord = nCoords-1; coord >= 0; --coord) {
-                int offset = dimIdxOffsets[coord];  // -1, 0, 1, or 2
-                int closestStep = closestDiscretizationSteps[coord];
-                int step = closestStep + offset;
-
-                beta *= betas[coord][offset+1];
-                evalIdx += evalStride * step;
-                evalStride *= discretizations[coord].nsteps;
-            }
-
-            double gridSize = (discretizations[coordIdx].end-discretizations[coordIdx].begin)/discretizations[coordIdx].nsteps;
-            z = std::fma(beta, evals.at(evalIdx)/gridSize, z);
-            {
-                int pos = nCoords-1;
-                ++dimIdxOffsets[pos];  // perform least-significant increment (may overflow)
-                while (pos > 0 && dimIdxOffsets[pos] > 2) {  // handle overflows + carry propagation
-                    dimIdxOffsets[pos] = -1;  // overflow
-                    ++dimIdxOffsets[pos-1];  // carry propagation
-                    --pos;
-                }
-            }
-
-            ++cnt;
-        }
-        {
-            int expectedIterations = 1 << (2*nCoords);
-            if (cnt != expectedIterations) {
-                std::stringstream msg;
-                msg << "invalid number of permutations explored: expected = " << expectedIterations << ", got = " << cnt;
-                OPENSIM_THROW(OpenSim::Exception, std::move(msg).str());
-            }
-        }
-
-        return z;
-    }
-
-    class FunctionBasedPathDiscretizationSet : public OpenSim::Set<FunctionBasedPathDiscretization> {
-        OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretizationSet, OpenSim::Set<FunctionBasedPathDiscretization>);
-    };
-
-    class JorisPathSimTKFunction : public SimTK::Function {
-        std::shared_ptr<std::vector<Discretization>> _discretizations;
-        std::shared_ptr<std::vector<double>> _evaluations;
-    public:
-        JorisPathSimTKFunction(
-                std::shared_ptr<std::vector<Discretization>> discretizations,
-                std::shared_ptr<std::vector<double>> evaluations) :
-            _discretizations{std::move(discretizations)},
-            _evaluations{std::move(evaluations)}
-        {
-        }
-
-        double calcValue(const SimTK::Vector& coordVals) const override
-        {
-            return Impl_GetPathLength(*_discretizations, *_evaluations, coordVals);
-        }
-
-        double calcDerivative(const SimTK::Array_<int>& derivComponents, const SimTK::Vector& coordVals) const override
-        {
-            SimTK_ASSERT_ALWAYS(derivComponents.size() == 1, "Can only find first-order derivative w.r.t. one coord");
-            return Impl_GetPathLengthDerivative(*_discretizations, *_evaluations, coordVals, derivComponents[0]);
-        }
-
-        int getArgumentSize() const override
-        {
-            return static_cast<int>(_discretizations->size());
-        }
-
-        int getMaxDerivativeOrder() const override
-        {
-            return 1;
-        }
-    };
-
-    class JorisPathFunction final : public OpenSim::Function {
-        OpenSim_DECLARE_CONCRETE_OBJECT(JorisPathFunction, OpenSim::Function);
-        // TODO: this needs to have PROPERTYs to store the discretizations + evaluations
-    public:
-        std::shared_ptr<std::vector<Discretization>> _discretizations;
-        std::shared_ptr<std::vector<double>> _evaluations;
-    public:
-        JorisPathFunction() :
-            _discretizations{std::make_shared<std::vector<Discretization>>()},
-            _evaluations{std::make_shared<std::vector<double>>()}
-        {
-        }
-
-        JorisPathFunction(
-                std::shared_ptr<std::vector<Discretization>> discretizations,
-                std::shared_ptr<std::vector<double>> evaluations) :
-            _discretizations{std::move(discretizations)},
-            _evaluations{std::move(evaluations)}
-        {
-        }
-
-        SimTK::Function* createSimTKFunction() const override
-        {
-            return new JorisPathSimTKFunction{_discretizations, _evaluations};
-        }
-    };
 
     struct FittingParams final {
 
@@ -1363,108 +1457,7 @@ namespace joris {
         }
     };
 
-    /** TODO: handle computing a fresh FBP from a PBP, flashing from props, etc.
-
-    // compute fresh implementation data from an existing PointBasedPath by
-    // evaluating it and fitting it to a function-based curve
-    //
-    // returns false if too many/too little coordinates affect the path
-    bool Impl_ComputeFromPBP(
-            const OpenSim::Model& model,
-            const OpenSim::PointBasedPath& pbp,
-            const FittingParams& params,
-            std::vector<Discretization>& discretizationsOut,
-            std::vector<double>& evalsOut,
-            std::vector<std::string>& coordAbsPathsOut)
-    {
-        // copy model, so we can independently equilibrate + realize + modify the
-        // copy without having to touch the source model
-        std::unique_ptr<OpenSim::Model> modelClone{model.clone()};
-        SimTK::State& initialState = modelClone->initSystem();
-        modelClone->equilibrateMuscles(initialState);
-        modelClone->realizeVelocity(initialState);
-
-        // set `coords`
-        impl.coords = coordsThatAffectPBP(*modelClone, pbp, initialState, params.numProbingDiscretizations, params.minProbingMomentArmChange);
-        if (static_cast<int>(impl.coords.size()) > params.maxCoordsThatCanAffectPath || impl.coords.size() == 0) {
-            impl.coords.clear();
-            return false;
-        }
-
-        // set `coordAbsPaths`
-        impl.coordAbsPaths.clear();
-        impl.coordAbsPaths.reserve(impl.coords.size());
-        for (const OpenSim::Coordinate* c : impl.coords) {
-            impl.coordAbsPaths.push_back(c->getAbsolutePathString());
-        }
-
-        // set `discretizations`
-        impl.discretizations.clear();
-        impl.discretizations.reserve(impl.coords.size());
-        for (const OpenSim::Coordinate* c : impl.coords) {
-            impl.discretizations.push_back(discretizationForCoord(*c, params.numDiscretizationStepsPerDimension));
-        }
-
-        // set `evals`
-        SimTK_ASSERT_ALWAYS(impl.coords.size() == impl.discretizations.size(), "these should be equal by now");
-        impl.evals = computeEvaluationsFromPBP(pbp, initialState, impl.coords.data(), impl.discretizations.data(), impl.coords.size());
-
-        return true;
-    }
-
-    // init underlying implementation data from a `FunctionBasedPath`s (precomputed) properties
-    //
-    // the properties being set in the FBP usually implies that the FBP has already been built
-    // from a PBP at some previous point in time
-    void Impl_InitFromFBPProperties(JorisFBP& impl)
-    {
-        FunctionBasedPathDiscretizationSet const& discSet = impl.getProperty_FunctionBasedPathDiscretizationSet().getValue();
-
-        // set `coords` pointers to null
-        //
-        // they are lazily looked up in a later phase (after the model is connected up)
-        impl.coords.clear();
-        impl.coords.resize(discSet.getSize(), nullptr);
-
-        // set `coordAbsPaths` from discretizations property
-        impl.coordAbsPaths.clear();
-        impl.coordAbsPaths.reserve(discSet.getSize());
-        for (int i = 0; i < discSet.getSize(); ++i) {
-            impl.coordAbsPaths.push_back(discSet[i].getProperty_coordinate_abspath().getValue());
-        }
-
-        // set `discretizations` from discretizations property
-        impl.discretizations.clear();
-        impl.discretizations.reserve(discSet.getSize());
-        for (int i = 0; i < discSet.getSize(); ++i) {
-            FunctionBasedPathDiscretization const& disc = discSet[i];
-            Discretization d;
-            d.begin = disc.getProperty_x_begin().getValue();
-            d.end = disc.getProperty_x_end().getValue();
-            d.nsteps = disc.getProperty_num_points().getValue();
-            impl.discretizations.push_back(d);
-        }
-
-        // set `evals` from evaluations property
-        auto const& evalsProp = impl.getProperty_Evaluations();
-        impl.evals.clear();
-        impl.evals.reserve(evalsProp.size());
-        for (int i = 0; i < evalsProp.size(); ++i) {
-            impl.evals.push_back(evalsProp.getValue(i));
-        }
-    }
-
-    // ensure that the OpenSim::Coordinate* pointers held in Impl are up-to-date
-    //
-    // the pointers are there to reduce runtime path lookups
-    static void Impl_SetCoordinatePointersFromCoordinatePaths(JorisFBP& impl,
-                                                              OpenSim::Component const& c) {
-
-        for (size_t i = 0; i < impl.coords.size(); ++i) {
-            impl.coords[i] = &c.getComponent<OpenSim::Coordinate>(impl.coordAbsPaths[i]);
-        }
-    }
-
+    /* todo
     std::unique_ptr<JorisFBP> fromPointBasedPath(
             const Model& model,
             const PointBasedPath& pbp,
@@ -1523,33 +1516,74 @@ namespace joris {
 
         return fbp;
     }
-    */
+
+    // compute fresh implementation data from an existing PointBasedPath by
+    // evaluating it and fitting it to a function-based curve
+    //
+    // returns false if too many/too little coordinates affect the path
+    bool Impl_ComputeFromPBP(
+            const OpenSim::Model& model,
+            const OpenSim::PointBasedPath& pbp,
+            const FittingParams& params,
+            std::vector<Discretization>& discretizationsOut,
+            std::vector<double>& evalsOut,
+            std::vector<std::string>& coordAbsPathsOut)
+    {
+        // copy model, so we can independently equilibrate + realize + modify the
+        // copy without having to touch the source model
+        std::unique_ptr<OpenSim::Model> modelClone{model.clone()};
+        SimTK::State& initialState = modelClone->initSystem();
+        modelClone->equilibrateMuscles(initialState);
+        modelClone->realizeVelocity(initialState);
+
+        // set `coords`
+        impl.coords = coordsThatAffectPBP(*modelClone, pbp, initialState, params.numProbingDiscretizations, params.minProbingMomentArmChange);
+        if (static_cast<int>(impl.coords.size()) > params.maxCoordsThatCanAffectPath || impl.coords.size() == 0) {
+            impl.coords.clear();
+            return false;
+        }
+
+        // set `coordAbsPaths`
+        impl.coordAbsPaths.clear();
+        impl.coordAbsPaths.reserve(impl.coords.size());
+        for (const OpenSim::Coordinate* c : impl.coords) {
+            impl.coordAbsPaths.push_back(c->getAbsolutePathString());
+        }
+
+        // set `discretizations`
+        impl.discretizations.clear();
+        impl.discretizations.reserve(impl.coords.size());
+        for (const OpenSim::Coordinate* c : impl.coords) {
+            impl.discretizations.push_back(discretizationForCoord(*c, params.numDiscretizationStepsPerDimension));
+        }
+
+        // set `evals`
+        SimTK_ASSERT_ALWAYS(impl.coords.size() == impl.discretizations.size(), "these should be equal by now");
+        impl.evals = computeEvaluationsFromPBP(pbp, initialState, impl.coords.data(), impl.discretizations.data(), impl.coords.size());
+
+        return true;
+    }
+        */
 }
 
-// TODO: test Joris's implementation with analytic functions etc.
+// TODO: test fitting some basic `PointBasedPath`s using the funciton-fitting implementation
 namespace joris {
-    OSIM_TEST(JorisFBP, CanBeDefaultConstructed)
-    {
-        JorisPathFunction fn;
-    }
+}
 
-    OSIM_TEST(JorisFBP, CanBeUsedInAFunctionBasedPath)
-    {
-        JorisPathFunction fn;
-        OpenSim::FunctionBasedPath{fn, {}};  // trivial-case
-    }
+// TODO: implement conversion tool
+namespace joris {
+}
 
-    OSIM_TEST(JorisFBP, HasDerivativeOrderGreaterThanOrEqualTo1)
-    {
-        // the path function should be differentiable
+// TODO: test conversion tool works as intended
+namespace joris {
+}
 
-        JorisPathFunction fn;
-        SimTK_TEST(fn.getMaxDerivativeOrder() >= 1)
-    }
+// TODO: implement CLI tool
+namespace joris {
+}
 
-    // etc.: maybe these tests can be broken down into lower-level and higher
-    //       -level (e.g. test low-level polynomial maths, test their use in
-    //       a higher-level function object, etc. etc.)
+// TODO: implement CLI tests
+namespace joris {
 }
 
 int main()

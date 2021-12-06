@@ -305,3 +305,17 @@ int OpenSim::FunctionBasedPath::indexOfCoordinate(const Coordinate& c) const
     }
     return -1;
 }
+
+/* TODO: in extendFinalizeConnections
+ *
+// ensure that the OpenSim::Coordinate* pointers held in Impl are up-to-date
+//
+// the pointers are there to reduce runtime path lookups
+static void Impl_SetCoordinatePointersFromCoordinatePaths(JorisFBP& impl,
+                                                          OpenSim::Component const& c) {
+
+    for (size_t i = 0; i < impl.coords.size(); ++i) {
+        impl.coords[i] = &c.getComponent<OpenSim::Coordinate>(impl.coordAbsPaths[i]);
+    }
+}
+*/
