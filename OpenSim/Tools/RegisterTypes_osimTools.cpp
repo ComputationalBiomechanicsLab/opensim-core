@@ -34,6 +34,7 @@
 #include "AnalyzeTool.h"
 #include "InverseKinematicsTool.h"
 #include "IMUInverseKinematicsTool.h"
+#include "FunctionBasedPathConversionTool.h"
 
 #include "InverseDynamicsTool.h"
 
@@ -79,6 +80,7 @@ OSIMTOOLS_API void RegisterTypes_osimTools()
     Object::registerType( RRATool() );
     Object::registerType( ForwardTool() );
     Object::registerType( AnalyzeTool() );
+    Object::registerType( FunctionBasedPathConversionTool() );
 
     Object::registerType( GenericModelMaker() );
     Object::registerType( IKCoordinateTask() );

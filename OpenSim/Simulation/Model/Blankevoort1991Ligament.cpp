@@ -81,7 +81,6 @@ void Blankevoort1991Ligament::setNull()
 }
 
 void Blankevoort1991Ligament::constructProperties() {
-    constructProperty_GeometryPath(GeometryPath());
     constructProperty_linear_stiffness(1.0);
     constructProperty_transition_strain(0.06);
     constructProperty_damping_coefficient(0.003);

@@ -52,7 +52,13 @@
 #include "Model/PathPointSet.h"
 #include "Model/ConditionalPathPoint.h"
 #include "Model/MovingPathPoint.h"
+
 #include "Model/GeometryPath.h"
+#include "Model/PointBasedPath.h"
+#include "Model/FunctionBasedPathDiscretization.h"
+#include "Model/FunctionBasedPathDiscretizationSet.h"
+#include "Model/FunctionBasedPath.h"
+
 #include "Model/PrescribedForce.h"
 #include "Model/PointToPointSpring.h"
 #include "Model/ExpressionBasedPointToPointForce.h"

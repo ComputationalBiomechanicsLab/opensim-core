@@ -25,7 +25,9 @@
 // INCLUDES
 //=============================================================================
 #include "Ligament.h"
-#include "GeometryPath.h"
+//#include "GeometryPath.h"
+#include "PointBasedPath.h"
+#include "FunctionBasedPath.h"
 #include "PointForceDirection.h"
 #include <OpenSim/Common/SimmSpline.h>
 
@@ -63,7 +65,7 @@ Ligament::Ligament()
 void Ligament::constructProperties()
 {
     setAuthors("Peter Loan");
-    constructProperty_GeometryPath(GeometryPath());
+//    constructProperty_GeometryPath(GeometryPath());
     constructProperty_resting_length(0.0);
     constructProperty_pcsa_force(0.0);
 
@@ -244,7 +246,8 @@ void Ligament::computeForce(const SimTK::State& s,
     setCacheVariableValue(s, _tensionCV, force);
 
     OpenSim::Array<PointForceDirection*> PFDs;
-    path.getPointForceDirections(s, &PFDs);
+//    path.getPointForceDirections(s, &PFDs);
+    path.addInEquivalentForces(s,force,bodyForces,generalizedForces);
 
     for (int i=0; i < PFDs.getSize(); i++) {
         applyForceToPoint(s, PFDs[i]->frame(), PFDs[i]->point(), 

@@ -1,7 +1,8 @@
-#ifndef OPENSIM_OSIMTOOLS_H_
-#define OPENSIM_OSIMTOOLS_H_
+#ifndef FUNCTIONBASEDPATHDISCRETIZATIONSET_H
+#define FUNCTIONBASEDPATHDISCRETIZATIONSET_H
+
 /* -------------------------------------------------------------------------- *
- *                           OpenSim:  osimTools.h                            *
+ *            OpenSim: FunctionBasedPathDiscretizationSet.h                   *
  * -------------------------------------------------------------------------- *
  * The OpenSim API is a toolkit for musculoskeletal modeling and simulation.  *
  * See http://opensim.stanford.edu and the NOTICE file for more information.  *
@@ -9,8 +10,8 @@
  * National Institutes of Health (U54 GM072970, R24 HD065690) and by DARPA    *
  * through the Warrior Web program.                                           *
  *                                                                            *
- * Copyright (c) 2005-2017 Stanford University and the Authors                *
- * Author(s): Ayman Habib                                                     *
+ * Copyright (c) 2005-2021 TU Delft and the Authors                           *
+ * Author(s): Joris Verhagen                                                  *
  *                                                                            *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may    *
  * not use this file except in compliance with the License. You may obtain a  *
@@ -23,33 +24,16 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
-#include "ScaleTool.h"
-#include "RRATool.h"
-#include "CMCTool.h"
-#include "ForwardTool.h"
-#include "AnalyzeTool.h"
-#include "FunctionBasedPathConversionTool.h"
+#include <OpenSim/Simulation/osimSimulationDLL.h>
+#include <OpenSim/Common/Set.h>
+#include <OpenSim/Simulation/Model/FunctionBasedPathDiscretization.h>
 
-#include "InverseKinematicsTool.h"
-#include "InverseDynamicsTool.h"
-#include "GenericModelMaker.h"
-#include "TrackingTask.h"
-#include "MuscleStateTrackingTask.h"
-#include "IKCoordinateTask.h"
-#include "IKMarkerTask.h"
-#include "IKTaskSet.h"
-#include "MarkerPair.h"
-#include "MarkerPairSet.h"
-#include "MarkerPlacer.h"
-#include "Measurement.h"
-#include "MeasurementSet.h"
-#include "ModelScaler.h"
-#include "CMC.h"
-#include "CMC_Point.h"
-#include "CMC_Joint.h"
-#include "SMC_Joint.h"
-#include "CMC_TaskSet.h"
-#include "CorrectionController.h"
-#include "RegisterTypes_osimTools.h"    // to expose RegisterTypes_osimTools
+namespace OpenSim {
 
-#endif // OPENSIM_OSIMTOOLS_H_
+class OSIMSIMULATION_API FunctionBasedPathDiscretizationSet : public Set<FunctionBasedPathDiscretization> {
+    OpenSim_DECLARE_CONCRETE_OBJECT(FunctionBasedPathDiscretizationSet, Set<FunctionBasedPathDiscretization>);
+};
+
+}
+
+#endif // FUNCTIONBASEDPATHDISCRETIZATIONSET_H

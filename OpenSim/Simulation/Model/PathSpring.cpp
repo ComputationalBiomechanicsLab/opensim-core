@@ -25,7 +25,9 @@
 // INCLUDES
 //=============================================================================
 #include "PathSpring.h"
-#include "GeometryPath.h"
+//#include "GeometryPath.h"
+#include "PointBasedPath.h"
+#include "FunctionBasedPath.h"
 #include "PointForceDirection.h"
 
 //=============================================================================
@@ -64,7 +66,7 @@ PathSpring::PathSpring(const string& name, double restLength,
 void PathSpring::constructProperties()
 {
     setAuthors("Ajay Seth");
-    constructProperty_GeometryPath(GeometryPath());
+//    constructProperty_GeometryPath(GeometryPath());
     constructProperty_resting_length(SimTK::NaN);
     constructProperty_stiffness(SimTK::NaN);
     constructProperty_dissipation(SimTK::NaN);
@@ -206,7 +208,8 @@ void PathSpring::computeForce(const SimTK::State& s,
     const double& tension = getTension(s);
 
     OpenSim::Array<PointForceDirection*> PFDs;
-    path.getPointForceDirections(s, &PFDs);
+//    path.getPointForceDirections(s, &PFDs);
+    path.addInEquivalentForces(s,tension,bodyForces,generalizedForces);
 
     for (int i=0; i < PFDs.getSize(); i++) {
         applyForceToPoint(s, PFDs[i]->frame(), PFDs[i]->point(), 

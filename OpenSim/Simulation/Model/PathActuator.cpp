@@ -62,7 +62,7 @@ void PathActuator::setNull()
  */
 void PathActuator::constructProperties()
 {
-    constructProperty_GeometryPath(GeometryPath());
+    constructProperty_GeometryPath(PointBasedPath());
     constructProperty_optimal_force(1.0);
 }
 
@@ -107,6 +107,7 @@ double PathActuator::getOptimalForce() const
  */
 double PathActuator::getLength(const SimTK::State& s) const
 {
+//    return path->getLength(s);
     return getGeometryPath().getLength(s);
 }
 //_____________________________________________________________________________
@@ -117,6 +118,7 @@ double PathActuator::getLength(const SimTK::State& s) const
  */
 double PathActuator::getLengtheningSpeed(const SimTK::State& s) const
 {
+//    return path->getLengtheningSpeed(s);
     return getGeometryPath().getLengtheningSpeed(s);
 }
 //_____________________________________________________________________________
@@ -176,7 +178,8 @@ void PathActuator::computeForce( const SimTK::State& s,
     const GeometryPath &path = getGeometryPath();
 
     // compute path's lengthening speed if necessary
-    double speed = path.getLengtheningSpeed(s);
+    double speed = getGeometryPath().getLengtheningSpeed(s);
+//    double speed = path.getLengtheningSpeed(s);
 
     // the lengthening speed of this actuator is the "speed" of the actuator 
     // used to compute power

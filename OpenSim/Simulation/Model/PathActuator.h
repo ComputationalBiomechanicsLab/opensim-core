@@ -24,7 +24,9 @@
  * -------------------------------------------------------------------------- */
 
 #include "Actuator.h"
-#include "GeometryPath.h"
+//#include "GeometryPath.h"
+#include "PointBasedPath.h"
+#include "FunctionBasedPath.h"
 
 //=============================================================================
 //=============================================================================
@@ -50,6 +52,8 @@ public:
 //=============================================================================
     OpenSim_DECLARE_UNNAMED_PROPERTY(GeometryPath,
         "The set of points defining the path of the actuator.");
+    OpenSim_DECLARE_UNNAMED_PROPERTY(PointBasedPath,
+        "The set of points defining the path of the actuator but on a lower abstraction.");
     OpenSim_DECLARE_PROPERTY(optimal_force, double,
         "The maximum force this actuator can produce.");
 
@@ -69,8 +73,12 @@ public:
     // Path
     GeometryPath& updGeometryPath() { return upd_GeometryPath(); }
     const GeometryPath& getGeometryPath() const 
-    {   return get_GeometryPath(); }
+    {  return get_GeometryPath(); }
     bool hasGeometryPath() const override { return true;};
+
+    PointBasedPath& updPointBasedPath() { return upd_PointBasedPath(); }
+    const PointBasedPath& getPointBasedPath() const
+    {  return get_PointBasedPath();}
 
     // OPTIMAL FORCE
     void setOptimalForce(double aOptimalForce);

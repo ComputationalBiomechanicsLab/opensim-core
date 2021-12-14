@@ -59,7 +59,13 @@
 #include "Model/PathPointSet.h"
 #include "Model/ConditionalPathPoint.h"
 #include "Model/MovingPathPoint.h"
+
 #include "Model/GeometryPath.h"
+#include "Model/PointBasedPath.h"
+#include "Model/FunctionBasedPathDiscretization.h"
+#include "Model/FunctionBasedPathDiscretizationSet.h"
+#include "Model/FunctionBasedPath.h"
+
 #include "Model/PrescribedForce.h"
 #include "Model/ExternalForce.h"
 #include "Model/PointToPointSpring.h"
@@ -190,7 +196,11 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( LineGeometry());
     Object::registerType( FrameGeometry());
     Object::registerType( Arrow());
-    Object::registerType( GeometryPath());
+
+    Object::registerType( OpenSim::PointBasedPath());
+    Object::registerType( OpenSim::FunctionBasedPathDiscretization());
+    Object::registerType( OpenSim::FunctionBasedPathDiscretizationSet());
+    Object::registerType( OpenSim::FunctionBasedPath());
 
     Object::registerType( ControlSet() );
     Object::registerType( ControlConstant() );
@@ -309,6 +319,9 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
 
     Object::renameType("MuscleMetabolicPowerProbeUmberger2010_MetabolicMuscleParameterSet",  
         "Umberger2010MuscleMetabolicsProbe_MetabolicMuscleParameterSet");
+
+    // GeometryPath now abstract but defaults to a PointBasedPath
+    Object::renameType("GeometryPath",      "PointBasedPath");
 
   } catch (const std::exception& e) {
     std::cerr 

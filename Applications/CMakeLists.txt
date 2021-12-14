@@ -8,6 +8,7 @@ add_subdirectory(IK)
 add_subdirectory(ID)
 add_subdirectory(CMC)
 add_subdirectory(RRA)
+add_subdirectory(FunctionBasedPathConversion)
 add_subdirectory(opensense)
 add_subdirectory(versionUpdate)
 
