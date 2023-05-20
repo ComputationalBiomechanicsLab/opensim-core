@@ -10,6 +10,12 @@ include(ExternalProject)
 include(CMakeParseArguments)
 include(CMakeDependentOption)
 
+set(
+    SIMBODY_EXTRA_CMAKE_ARGS ""
+    CACHE STRING
+    "extra args to forward when configuring Simbody with CMake. The format must be: VARNAME:TYPE=VALUE"
+)
+
 # Set the default for CMAKE_INSTALL_PREFIX.
 function(SetDefaultCMakeInstallPrefix)
     get_filename_component(BASE_DIR ${CMAKE_SOURCE_DIR} DIRECTORY)
@@ -185,7 +191,8 @@ AddDependency(NAME       simbody
               GIT_URL    https://github.com/simbody/simbody.git
               GIT_TAG    e855d954a786128c3271a3406d7bda782e7c4c4f
               CMAKE_ARGS -DBUILD_EXAMPLES:BOOL=OFF
-                         -DBUILD_TESTING:BOOL=OFF)
+                         -DBUILD_TESTING:BOOL=OFF
+                         ${SIMBODY_EXTRA_CMAKE_ARGS})
 
 AddDependency(NAME       docopt
               DEFAULT    ON
