@@ -13,7 +13,7 @@ include(CMakeDependentOption)
 set(
     SIMBODY_EXTRA_CMAKE_ARGS ""
     CACHE STRING
-    "extra args to forward when configuring Simbody with CMake. The format must be: VARNAME:TYPE=VALUE"
+    "extra args to forward when configuring Simbody with CMake. The format must be: VARNAME1:TYPE1=VALUE1;VARNAME2:TYPE2=VALUE2"
 )
 
 # Set the default for CMAKE_INSTALL_PREFIX.
