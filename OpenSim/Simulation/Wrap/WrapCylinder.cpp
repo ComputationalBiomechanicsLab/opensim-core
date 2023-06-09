@@ -49,6 +49,301 @@ static Vec3 dn(0.0, 0.0, 1.0);
 #define MAX_ITERATIONS    100
 #define TANGENCY_THRESHOLD (0.1 * SimTK_DEGREE_TO_RADIAN) // find tangency to within 1 degree
 
+double wrap_tau(double angle) {
+    if (angle < 0.) {
+        angle += 2. * M_PI;
+    }
+    return angle;
+}
+
+// We can construct a right angled triangle with lengths:
+// - long side = |point_xy|
+// - near side = radius
+// - far side = sqrt( long^2 + short^2 )
+struct IncidentAngles {
+    double _pos_angle = 0./0.;
+    double _neg_angle = 0./0.;
+    // XY-distance from point to circle.
+    double _length = 0./0.;
+
+    // When point lies in cylinder.
+    bool _invalid = false;
+
+    IncidentAngles(
+        const SimTK::Vec3& point,
+        double radius
+    ) {
+        // Near triangle side (squared).
+        double near_side = radius;
+        double near_side_sq = std::pow(near_side, 2);
+
+        // Long triangle side (squared).
+        double long_side_sq = std::pow(point[0], 2) + std::pow(point[1], 2);
+        {
+            // Point must not lie within cylinder.
+            _invalid = long_side_sq < near_side_sq;
+            if (_invalid) {
+                return;
+            }
+        }
+        double long_side = std::sqrt(long_side_sq);
+
+        // Far triangle side.
+        double far_side = std::sqrt(long_side_sq - near_side_sq);
+
+        double offset_angle = std::atan2(point[1], point[0]);
+        double delta_angle = std::atan2(far_side, near_side);
+        _pos_angle = wrap_tau(offset_angle + delta_angle);
+        _neg_angle = wrap_tau(offset_angle - delta_angle);
+        _length = far_side;
+    }
+};
+
+std::ostream& operator<<(std::ostream& os, const IncidentAngles& x) {
+    os << "IncidentAngles { ";
+    os << "pos_angles: " << x._pos_angle;
+    os << ", ";
+    os << "neg_angles: " << x._neg_angle;
+    os << ", ";
+    os << "length: " << x._length;
+    os << " }";
+    return os;
+}
+
+// Check if value is in range (inclusive).
+bool in_range(double value, double min, double max) {
+    return ( value >= min ) && ( value <= max );
+}
+
+// Angle difference on range [0., 2pi].
+double delta_angle(double angle_pos, double angle_neg) {
+    double delta = angle_neg - angle_pos;
+    delta += (delta < 0.)? + 2. * M_PI: 0.;
+    return delta;
+}
+
+bool unconstrained_miss(
+    const SimTK::Vec3& point_a,
+    const SimTK::Vec3& point_b,
+    double radius,
+    int wrapAxis,
+    int wrapSign
+) {
+    bool miss = false;
+
+    // Difference d = pb - pa in xy plane.
+    double dx = point_b[0] - point_a[0];
+    double dy = point_b[1] - point_a[1];
+
+    // Dot products: xTy = x^T * y
+    double dTd = std::pow(dx, 2) + std::pow(dy, 2);
+    double aTa = std::pow(point_a[0],2 ) + std::pow(point_a[1], 2);
+    double dTa = point_a[0] * dx + point_a[1] * dy;
+
+    // Shortest distance (squared) to line b-a:
+    double distance_sq = aTa - std::pow(dTa, 2) / dTd;
+
+    // Check missing the cylinder.
+    if ( wrapSign == 0 ) {
+        // If shortest distance > radius -> miss.
+        miss |= distance_sq > std::pow(radius, 2);
+
+        // Otherwise if a,b on same side of shortest distance vector -> miss.
+        double dTb = point_b[0] * dx + point_b[1] * dy;
+        bool ab_same_side =  ( dTb * dTa ) > 0.;
+        miss |=  ab_same_side;
+
+        return miss;
+    }
+
+    // Both points in active quadrant -> miss.
+    if (DSIGN(point_a[wrapAxis]) == wrapSign && DSIGN(point_b[wrapAxis]) == wrapSign) {
+        miss |= distance_sq > std::pow(radius, 2);
+    }
+
+    // If one incident in non-active, check if closest is also on non-active.
+    if ( DSIGN(point_a[wrapAxis]) != DSIGN(point_b[wrapAxis]) ) {
+        double bTb = std::pow(point_b[0],2 ) + std::pow(point_b[1], 2);
+            double near = (aTa < bTb)? point_a[wrapAxis]: point_b[wrapAxis];
+            miss |= DSIGN(near) != wrapSign;
+    }
+    return miss;
+}
+
+bool missed_by_angles(
+    double angle_pos,
+    double angle_neg,
+    int wrapAxis,
+    int wrapSign
+) {
+    if (wrapSign == 0) {
+        return false;
+    }
+
+    // Check in which quadrants the incident angles fall.
+    bool pos_not_in_active;
+    bool neg_not_in_active;
+    // +X -> [PI/2 , -PI/2]
+    if ( wrapAxis == 0) {
+        pos_not_in_active = in_range(angle_pos, 0.5 * M_PI, 1.5 * M_PI);
+        neg_not_in_active = in_range(angle_neg, 0.5 * M_PI, 1.5 * M_PI);
+    // +Y -> [0, PI]
+    } else if ( wrapAxis == 1 ) {
+        pos_not_in_active = angle_pos > 1. * M_PI;
+        neg_not_in_active = angle_neg > 1. * M_PI;
+    } else {
+        return false;
+    }
+
+    // Invert the quadrant.
+    if ( wrapSign < 0 ) {
+        pos_not_in_active = !pos_not_in_active;
+        neg_not_in_active = !neg_not_in_active;
+    }
+
+    // If both incident angles in non-active quadrant.
+    bool miss = pos_not_in_active && neg_not_in_active;
+
+    // If positive and negative in active quadrant, but wrapping the non-active.
+    miss |= !pos_not_in_active && !neg_not_in_active && ( delta_angle(angle_pos, angle_neg) > M_PI );
+
+    return miss;
+}
+
+struct ScrewWrap {
+	double _delta_angle = 0. / 0.;
+	double _angle = 0. / 0.;
+
+	double _delta_height = 0. / 0.;
+	double _height = 0. / 0.;
+
+    double _length = 0. / 0.;
+    double _radius = 0. / 0.;
+
+    bool _miss = false;
+    bool _invalid = false; // Any point lies within cylinder.
+
+	ScrewWrap(
+        const SimTK::Vec3& point_a,
+        const SimTK::Vec3& point_b,
+		double radius,
+        int wrapAxis,
+        int wrapSign
+    ): _radius(radius) {
+
+        SimTK_ERRCHK_ALWAYS(wrapAxis != 2,
+            "ScrewMap constructor",
+            "_wrapAxis equal to 2!?");
+
+        _miss |= unconstrained_miss(point_a, point_b, radius, wrapAxis, wrapSign);
+        // TODO check quadrant:
+        if (_miss) {
+            return;
+        }
+
+        IncidentAngles angles_a(point_a, radius);
+        IncidentAngles angles_b(point_b, radius);
+
+        _invalid = angles_a._invalid || angles_b._invalid;
+        if (_invalid) {
+            return;
+        }
+
+        bool pos_miss = missed_by_angles(angles_a._pos_angle, angles_b._neg_angle, wrapAxis, wrapSign);
+        bool neg_miss = missed_by_angles(angles_b._pos_angle, angles_a._neg_angle, wrapAxis, wrapSign);
+
+        _miss |= pos_miss && neg_miss;
+        if (_miss) {
+            return;
+        }
+
+        bool pos_wrap_valid = !pos_miss;
+        bool neg_wrap_valid = !neg_miss;
+
+        double delta_angle_pos = delta_angle(angles_a._pos_angle, angles_b._neg_angle);
+        double delta_angle_neg = delta_angle(angles_b._pos_angle, angles_a._neg_angle);
+
+        bool positive_wrap = false;
+        if (pos_wrap_valid && neg_wrap_valid) {
+            // Both wrapps hit the valid quadrant: take minimal wrap length.
+            positive_wrap = std::abs(delta_angle_neg) > std::abs(delta_angle_pos);
+        } else {
+            positive_wrap = pos_wrap_valid;
+        }
+
+        // Set the incident angles.
+        if (positive_wrap) {
+            _angle = angles_a._pos_angle;
+            _delta_angle = delta_angle_pos;
+        } else {
+            _angle = angles_a._neg_angle;
+            _delta_angle = -delta_angle_neg;
+        }
+
+        // Compute the incidence heights: linear interpolation.
+        double length_tot = angles_a._length + angles_b._length + std::abs(_delta_angle) * radius;
+        double height_tot = point_b[2] - point_a[2];
+        double height_a = height_tot / length_tot * angles_a._length + point_a[2];
+        double height_b = height_tot / length_tot * ( length_tot - angles_b._length ) + point_a[2];
+
+        _height = height_a;
+        _delta_height = height_b - height_a;
+
+        _length = std::sqrt(
+            std::pow(_radius * _delta_angle, 2) +
+            std::pow(_delta_height, 2)
+        );
+	}
+
+	SimTK::Vec3 point_on_surface(double t) const {
+		double angle = t * _delta_angle + _angle;
+		double height = t * _delta_height + _height;
+
+		return SimTK::Vec3(std::cos(angle) * _radius, std::sin(angle) * _radius,
+						   height);
+	}
+
+    int return_code() const {
+        // TODO not using: wrapped? = successful wrap, but may not be 'best' path
+        if (_miss) {
+            return WrapObject::WrapAction::noWrap;
+        }
+        if (_invalid) {
+            return WrapObject::WrapAction::insideRadius;
+        }
+        return WrapObject::WrapAction::mandatoryWrap;
+    }
+
+    bool wrap_ok() {
+        return !_miss && !_invalid;
+    }
+
+    double wrap_length() {
+        return _length;
+    }
+};
+
+std::ostream& operator<<(std::ostream& os, const ScrewWrap& screw) {
+    os << "ScrewWrap { ";
+    os << "delta_angle: " << screw._delta_angle;
+    os << ", ";
+    os << "angle: " << screw._angle;
+    os << ", ";
+    os << "delta_height: " << screw._delta_height;
+    os << ", ";
+    os << "height: " << screw._height;
+    os << ", ";
+    os << "length: " << screw._length;
+    os << ", ";
+    os << "radius: " << screw._radius;
+    os << ", ";
+    os << "miss: " << screw._miss;
+    os << ", ";
+    os << "invalid: " << screw._invalid;
+    os << " }";
+    return os;
+}
+
 //=============================================================================
 // CONSTRUCTOR(S) AND DESTRUCTOR
 //=============================================================================
@@ -177,6 +472,44 @@ string WrapCylinder::getDimensionsString() const
 int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                     const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
+    ScrewWrap screw = ScrewWrap(aPoint1, aPoint2, get_radius(), _wrapAxis, _wrapSign);
+
+    aWrapResult.wrap_path_length = 0.0;
+    aWrapResult.wrap_pts.setSize(0);
+    aFlag = false;
+
+    if (screw.wrap_ok()) {
+        aFlag = true;
+        aWrapResult.r1 = screw.point_on_surface(0.);
+        aWrapResult.r2 = screw.point_on_surface(1.);
+
+        aWrapResult.wrap_path_length = screw.wrap_length();
+
+        aWrapResult.wrap_pts.setSize(0);
+
+        int numWrapSegments = (int)(aWrapResult.wrap_path_length / 0.002);
+        if (numWrapSegments < 1) {numWrapSegments = 1;}
+        for (int i = 0; i < numWrapSegments; i++) {
+            double t = (double)i / numWrapSegments;
+            aWrapResult.wrap_pts.append(screw.point_on_surface(t));
+        }
+    }
+
+    return screw.return_code();
+
+    std::cout << "screw = " << screw << std::endl;
+    std::cout << "\n    ";
+    std::cout << "let radius = " << get_radius() <<";";
+    std::cout << "// ";
+    std::cout << "wrapSign = " << _wrapSign;
+    std::cout << "// ";
+    std::cout << "wrapAxis = " << _wrapAxis;
+    std::cout << "\n    ";
+    std::cout << "let p0 = Vector3::new(" << aPoint1 << ");";
+    std::cout << "\n    ";
+    std::cout << "let p1 = Vector3::new(" << aPoint2 << ");";
+    std::cout << "\n    ";
+
     const double& _radius = get_radius();
     double dist, p11_dist, p22_dist, t, dot1, dot2, dot3, dot4, d, sin_theta,
         /* *r11, *r22, */alpha, beta, r_squared = _radius * _radius;
