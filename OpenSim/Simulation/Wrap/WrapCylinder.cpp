@@ -54,276 +54,361 @@ double wrap_tau(double angle) {
     return ( angle < 0. )? angle + 2. * M_PI: angle;
 }
 
-struct IncidentAngles {
-    // Angle of point on circle for positive wrapping direction.
-    double _pos_angle = 0./0.;
-    // Angle of point on circle for negative wrapping direction.
-    double _neg_angle = 0./0.;
-    // XY-distance from point to circle.
-    double _xy_distance = 0./0.;
-    // When point lies in cylinder.
-    bool _point_inside_cylinder = false;
+// Wrapping path of single point over circle and back to the point.
+struct SinglePointCircleWrap final {
 
-    IncidentAngles(
-        const SimTK::Vec3& point,
-        double radius
-    ) {
-        // We can construct a right angled triangle with lengths:
-        // - long side = |point_xy|
+    SinglePointCircleWrap(
+        const SimTK::Vec2& point,
+        double radius)
+    {
+        // The wrapping path is symmetric about the line through the point.
+        // The angle between that line and the first point on the circle can be
+        // found from the right-angled triangle with sides:
+        // - long side = |point|
         // - near side = radius
-        // - far side = sqrt( long^2 + short^2 )
-
-        // Near triangle side (squared).
-        double near_side = radius;
-        double near_side_sq = std::pow(near_side, 2);
 
         // Long triangle side (squared).
-        double long_side_sq = std::pow(point[0], 2) + std::pow(point[1], 2);
-        {
-            // Point must not lie within cylinder.
-            _point_inside_cylinder = long_side_sq < near_side_sq;
-            if (_point_inside_cylinder) {
-                return;
-            }
+        double long_side_sq = SimTK::dot(point, point);
+        // Near triangle side (squared).
+        double radius_sq = std::pow(radius, 2);
+        // Intermezzo: Point must not lie within cylinder.
+        _inside_circle = long_side_sq < radius_sq;
+        if (_inside_circle) {
+            return;
         }
-
         // Far triangle side.
-        double far_side = std::sqrt(long_side_sq - near_side_sq);
+        double far_side = std::sqrt(long_side_sq - radius_sq);
 
-        double offset_angle = std::atan2(point[1], point[0]);
-        double delta_angle = std::atan2(far_side, near_side);
-        _pos_angle = wrap_tau(offset_angle + delta_angle);
-        _neg_angle = wrap_tau(offset_angle - delta_angle);
-        _xy_distance = far_side;
+        double delta_angle = std::atan2(far_side, radius);
+        double angle_of_point = std::atan2(point[1], point[0]);
+        _start_angle = wrap_tau(angle_of_point + delta_angle);
+        _final_angle = wrap_tau(angle_of_point - delta_angle);
+        _surface_to_point_distance = far_side;
     }
+
+    // Start angle of wrapping path on circle: within [0, 2pi].
+    double _start_angle = NAN;
+    // Final angle of wrapping path on circle: within [0, 2pi].
+    double _final_angle = NAN;
+    // Distance from point to wrapping-point on circle.
+    double _surface_to_point_distance = NAN;
+
+    // Error flag: When point lies inside circle path does not exist.
+    bool _inside_circle = false;
 };
 
-std::ostream& operator<<(std::ostream& os, const IncidentAngles& x) {
-    os << "IncidentAngles { ";
-    os << "pos_angles: " << x._pos_angle;
+std::ostream& operator<<(std::ostream& os, const SinglePointCircleWrap& x) {
+    os << "SinglePointCircleWrap { ";
+    if (x._inside_circle) {
+        os << "_inside_circle: " << x._inside_circle << "}";
+        return os;
+    }
+    os << "_start_angle: " << x._start_angle;
     os << ", ";
-    os << "neg_angles: " << x._neg_angle;
+    os << "_final_angle: " << x._final_angle;
     os << ", ";
-    os << "xy_distance: " << x._xy_distance;
+    os << "_surface_to_point_distance: " << x._surface_to_point_distance;
     os << " }";
     return os;
 }
 
-// Returns if points a,b miss the cylinder (no-wrapping).
-//
-// We check 3 conditions:
-// - 1. If unconstrained and line a-b does not intersect the cylinder.
-// - 2. If both points in active quadrant.
-// - 3. If one point in non-active quadrant, and closest point in non-active quadrant.
-bool missed_based_on_points(
-    const SimTK::Vec3& point_a,
-    const SimTK::Vec3& point_b,
-    double radius,
-    int wrapAxis,
-    int wrapSign
-) {
-    bool miss = false;
+// 2D wrapping path of point-a to point-b over a circle.
+struct CircleWrap final {
 
-    // Difference d = pb - pa in xy plane.
-    double dx = point_b[0] - point_a[0];
-    double dy = point_b[1] - point_a[1];
-
-    // Dot products: xTy = x^T * y
-    double dTd = std::pow(dx, 2) + std::pow(dy, 2);
-    double aTa = std::pow(point_a[0],2 ) + std::pow(point_a[1], 2);
-    double dTa = point_a[0] * dx + point_a[1] * dy;
-
-    // Shortest distance (squared) to line b-a:
-    double distance_sq = aTa - std::pow(dTa, 2) / dTd;
-
-    // In unconstrained case: Miss if line a-b does not cut cylinder.
-    if ( wrapSign == 0 ) {
-        // If shortest distance to
-        miss |= distance_sq > std::pow(radius, 2);
-
-        // Otherwise if a,b on same side of shortest distance vector -> miss.
-        double dTb = point_b[0] * dx + point_b[1] * dy;
-        bool ab_same_side =  ( dTb * dTa ) > 0.;
-        miss |=  ab_same_side;
-
-        return miss;
-    }
-
-    // Both points in active quadrant -> miss.
-    if (DSIGN(point_a[wrapAxis]) == wrapSign && DSIGN(point_b[wrapAxis]) == wrapSign) {
-        miss |= distance_sq > std::pow(radius, 2);
-    }
-
-    // If one point in non-active, check if closest is also in non-active quadrant.
-    if ( DSIGN(point_a[wrapAxis]) != DSIGN(point_b[wrapAxis]) ) {
-        double bTb = std::pow(point_b[0],2 ) + std::pow(point_b[1], 2);
-        double near = (aTa < bTb)? point_a[wrapAxis]: point_b[wrapAxis];
-        miss |= DSIGN(near) != wrapSign;
-    }
-    return miss;
-}
-
-// Checks if the wrapping from angle-start -> angle-end is valid.
-//
-// The conditions for a no-wrap:
-// 1. Both angles in non-active quadrant.
-// 2. Both angles in active-quadrant, but wrapping the entire non-active quadrant.
-//
-// Angle pos and neg are assumed to be within [0, 2pi]
-// wrapXAxis: wrapping x-quadrant = true, or wrapping y-quadrant = false
-bool wrap_is_invalid(
-    double angle_start,
-    double angle_end,
-    double delta_angle,
-    bool wrapXAxis,
-    int wrapSign
-) {
-    if (wrapSign == 0) {
-        return false;
-    }
-    bool negativeQuadrant = wrapSign < 0;
-
-    // Check if points on cylinder lie in the active quadrant.
-    auto not_in_active_quadrant = [&](double angle) -> bool {
-        bool not_in_active;
-
-        // If +X quadrant: angle must lie in [PI/2 , -PI/2]
-        if (wrapXAxis) {
-            not_in_active = ( angle + 0.5 * M_PI ) < M_PI;
-        // If +Y quadrant: angle must lie in [0 , PI]
-        } else {
-            not_in_active = angle > M_PI;
-        }
-        // Invert the quadrant if needed.
-        if (negativeQuadrant) {
-            return !not_in_active;
-        }
-        return not_in_active;
-    };
-
-    bool pos_not_in_active = not_in_active_quadrant(angle_start);
-    bool neg_not_in_active = not_in_active_quadrant(angle_end);
-
-    // If both incident angles in non-active quadrant.
-    bool miss = pos_not_in_active && neg_not_in_active;
-
-    // If positive and negative in active quadrant, but wrapping the non-active.
-    miss |= !pos_not_in_active && !neg_not_in_active && ( delta_angle > M_PI );
-
-    return miss;
-}
-
-struct ScrewMap {
-	double _delta_angle = 0. / 0.;
-	double _angle = 0. / 0.;
-
-	double _delta_height = 0. / 0.;
-	double _height = 0. / 0.;
-
-    double _length = 0. / 0.;
-    double _radius = 0. / 0.;
-
-    bool _miss = false;
-    bool _point_inside_cylinder = false;
-
-	ScrewMap(
-        const SimTK::Vec3& point_a,
-        const SimTK::Vec3& point_b,
-		double radius,
+    CircleWrap(
+        const SimTK::Vec2& point_a,
+        const SimTK::Vec2& point_b,
+        double radius,
         int wrapAxis,
         int wrapSign
-    ): _radius(radius) {
-
+    ) {
         SimTK_ERRCHK_ALWAYS(wrapAxis != 2,
-            "ScrewMap constructor",
-            "_wrapAxis equal to z-axis. This should not be possible.");
+            "CircleWrap",
+            "invalid quadrant: wrapAxis equals z-axis.");
 
-        _miss |= missed_based_on_points(point_a, point_b, radius, wrapAxis, wrapSign);
-        if (_miss) {
+        _no_wrap |= pre_wrap_check_failed(point_a, point_b, radius, wrapAxis, wrapSign);
+        if (_no_wrap) {
             return;
         }
 
-        IncidentAngles angles_a(point_a, radius);
-        IncidentAngles angles_b(point_b, radius);
+        const SinglePointCircleWrap angles_a(point_a, radius);
+        const SinglePointCircleWrap angles_b(point_b, radius);
 
-        _point_inside_cylinder = angles_a._point_inside_cylinder || angles_b._point_inside_cylinder;
-        if (_point_inside_cylinder) {
+        std::cout << "angles_a = " << angles_a << std::endl;
+        std::cout << "angles_b = " << angles_b << std::endl;
+
+        _inside_circle = angles_a._inside_circle || angles_b._inside_circle;
+        if (_inside_circle) {
             return;
         }
 
-        bool wrap_x_axis = wrapAxis == 0;
-        double delta_angle_pos = wrap_tau(angles_b._neg_angle - angles_a._pos_angle);
-        double delta_angle_neg = wrap_tau(angles_a._neg_angle - angles_b._pos_angle);
+        // There are two possible wrapping paths from a to b: positive and negative rotating paths.
+        const double delta_angle_pos = wrap_tau(angles_b._final_angle - angles_a._start_angle);
+        const double delta_angle_neg = wrap_tau(angles_a._final_angle - angles_b._start_angle);
 
-        bool pos_miss = wrap_is_invalid(angles_a._pos_angle, angles_b._neg_angle, delta_angle_pos, wrap_x_axis, wrapSign);
-        bool neg_miss = wrap_is_invalid(angles_b._pos_angle, angles_a._neg_angle, delta_angle_neg, wrap_x_axis, wrapSign);
+        // Check validity of each path.
+        const bool wrap_x_axis = wrapAxis == 0;
+        const bool pos_invalid = potential_wrap_is_invalid(angles_a._start_angle, angles_b._final_angle, delta_angle_pos, wrap_x_axis, wrapSign);
+        const bool neg_invalid = potential_wrap_is_invalid(angles_b._start_angle, angles_a._final_angle, delta_angle_neg, wrap_x_axis, wrapSign);
 
-        _miss |= pos_miss && neg_miss;
-        if (_miss) {
+        // Both invalid? -> no wrapping path.
+        _no_wrap |= pos_invalid && neg_invalid;
+        if (_no_wrap) {
             return;
         }
 
-        // Determine wrapping direction.
-        bool pos_wrap = !pos_miss;
-        if (pos_wrap && !neg_miss) {
+        // Determine wrapping direction: positive, or negative.
+        bool pos_wrap = !pos_invalid;
+        if (pos_wrap && !neg_invalid) {
             // Both wrapping directions are valid: take minimal wrap length.
             pos_wrap = std::abs(delta_angle_neg) > std::abs(delta_angle_pos);
         }
 
-        // Set the incident angles.
+        // Set the path angles.
         if (pos_wrap) {
-            _angle = angles_a._pos_angle;
+            _angle = angles_a._start_angle;
             _delta_angle = delta_angle_pos;
         } else {
-            _angle = angles_a._neg_angle;
+            _angle = angles_a._final_angle;
             _delta_angle = -delta_angle_neg;
         }
 
-        // Compute the incidence heights: linear interpolation.
-        double length_tot = angles_a._xy_distance + angles_b._xy_distance + std::abs(_delta_angle) * radius;
-        double height_tot = point_b[2] - point_a[2];
-        double height_a = height_tot / length_tot * angles_a._xy_distance + point_a[2];
-        double height_b = height_tot / length_tot * ( length_tot - angles_b._xy_distance ) + point_a[2];
+        // Set path segment lengths.
+        _length_point_a_to_circle = angles_a._surface_to_point_distance;
+        _length_on_circle = std::abs(_delta_angle) * radius;
+        _length_total = _length_point_a_to_circle + _length_on_circle +
+            angles_b._surface_to_point_distance;
+	}
 
-        _height = height_a;
-        _delta_height = height_b - height_a;
+    // Returns if wrapping should be attempted.
+    //
+    // Checks 3 conditions:
+    // - 1. If unconstrained and line a-b does not intersect the cylinder.
+    // - 2. If both points in active quadrant.
+    // - 3. If one point in non-active quadrant, and closest point in non-active quadrant.
+    static bool pre_wrap_check_failed(
+        const SimTK::Vec2& point_a,
+        const SimTK::Vec2& point_b,
+        double radius,
+        int wrapAxis,
+        int wrapSign)
+    {
+        bool miss = false;
+        SimTK::Vec2 vec_ab = point_b - point_a;
+        double vTv = SimTK::dot(vec_ab, vec_ab);
+        double aTa = SimTK::dot(point_a, point_a);
+        double vTa = SimTK::dot(vec_ab, point_a);
+
+        // Shortest distance (squared) to line b-a:
+        double distance_sq = aTa - std::pow(vTa, 2) / vTv;
+
+        // In unconstrained case: Miss if line a-b does not intersect circle.
+        if ( wrapSign == 0 ) {
+            // If shortest distance larger than radius.
+            miss |= distance_sq > std::pow(radius, 2);
+
+            // Otherwise if a,b on same side of shortest distance vector -> miss.
+            double dTb = SimTK::dot(vec_ab, point_b);
+            bool ab_same_side =  ( dTb * vTa ) > 0.;
+            miss |=  ab_same_side;
+
+            return miss;
+        }
+
+        // Both points in active quadrant -> miss.
+        if (DSIGN(point_a[wrapAxis]) == wrapSign && DSIGN(point_b[wrapAxis]) == wrapSign) {
+            miss |= distance_sq > std::pow(radius, 2);
+        }
+
+        // If one point in non-active, check if closest is also in non-active quadrant.
+        if ( DSIGN(point_a[wrapAxis]) != DSIGN(point_b[wrapAxis]) ) {
+            double bTb = std::pow(point_b[0],2 ) + std::pow(point_b[1], 2);
+            double near = (aTa < bTb)? point_a[wrapAxis]: point_b[wrapAxis];
+            miss |= DSIGN(near) != wrapSign;
+        }
+        return miss;
+    }
+
+    // Returns if the wrapping from start- to final-angle is invalid based on the quadrant.
+    //
+    // Checks 2 conditions:
+    // 1. Both angles in non-active quadrant.
+    // 2. Both angles in active-quadrant, but wrapping the entire non-active quadrant.
+    //
+    // Angles assumed to be within [0, 2pi]
+    // wrapXAxis: true if X-quadrant, false if y-quadrant.
+    static bool potential_wrap_is_invalid(
+        double start_angle,
+        double final_angle,
+        double delta_angle,
+        bool wrapXAxis,
+        int wrapSign)
+    {
+        if (wrapSign == 0) {
+            return false;
+        }
+        const bool negativeQuadrant = wrapSign < 0;
+
+        // Check if points on cylinder lie in the active quadrant.
+        auto not_in_active_quadrant = [&](double angle) -> bool {
+            bool not_in_active;
+
+            // If +X quadrant: angle must lie in [PI/2 , -PI/2]
+            if (wrapXAxis) {
+                not_in_active = ( angle + 0.5 * M_PI ) < M_PI;
+            // If +Y quadrant: angle must lie in [0 , PI]
+            } else {
+                not_in_active = angle > M_PI;
+            }
+            // Invert the quadrant if needed.
+            if (negativeQuadrant) {
+                return !not_in_active;
+            }
+            return not_in_active;
+        };
+
+        const bool pos_not_in_active = not_in_active_quadrant(start_angle);
+        const bool neg_not_in_active = not_in_active_quadrant(final_angle);
+
+        // If both angles in non-active quadrant.
+        bool miss = pos_not_in_active && neg_not_in_active;
+
+        // If positive and negative in active quadrant, but wrapping the non-active.
+        miss |= !pos_not_in_active && !neg_not_in_active && ( delta_angle > M_PI );
+
+        return miss;
+    }
+
+    // Starting angle of path on circle.
+	double _angle = NAN;
+    // Angle difference between start and final path points on circle.
+	double _delta_angle = NAN;
+    // Path lengths:
+    double _length_point_a_to_circle = NAN;
+    double _length_on_circle = NAN;
+    double _length_total = NAN;
+
+    // Error flags: no wrapping if either is set.
+    bool _no_wrap = false;
+    bool _inside_circle = false;
+};
+
+std::ostream& operator<<(std::ostream& os, const CircleWrap& x) {
+    os << "CircleWrap { ";
+    if (x._inside_circle) {
+        os << "inside_circle };";
+        return os;
+    }
+    if (x._no_wrap) {
+        os << "no_wrap };";
+        return os;
+    }
+    os << "_angle: " << x._angle;
+    os << ", _delta_angle: " << x._delta_angle;
+    os << ", _length_point_a_to_circle: " << x._length_point_a_to_circle;
+    os << ", _length_on_circle: " << x._length_on_circle;
+    os << ", _length_total: " << x._length_total;
+    os << " }";
+    return os;
+}
+
+struct ScrewMap final {
+	ScrewMap(
+        const SimTK::Vec3& point_a,
+        const SimTK::Vec3& point_b,
+		double radius,
+		double cylinder_length,
+        int wrapAxis,
+        int wrapSign
+    ): _radius(radius) {
+
+        // XY-coords can be computed by wrapping a circle.
+        CircleWrap circle_wrap(
+            SimTK::Vec2(point_a[0], point_a[1]),
+            SimTK::Vec2(point_b[0], point_b[1]),
+            radius,
+            wrapAxis,
+            wrapSign);
+        std::cout << circle_wrap << std::endl;
+
+        _no_wrap = circle_wrap._no_wrap;
+        _inside_radius = circle_wrap._inside_circle;
+        if (_no_wrap || _inside_radius) {
+            return;
+        }
+        _delta_angle = circle_wrap._delta_angle;
+        _angle = circle_wrap._angle;
+
+        // Path gradient in z-direction is constant:
+        const double delta_z_per_delta_xy = ( point_b[2] - point_a[2] ) / circle_wrap._length_total;
+
+        _height = point_a[2] + delta_z_per_delta_xy * circle_wrap._length_point_a_to_circle;
+        _delta_height = delta_z_per_delta_xy * circle_wrap._length_on_circle;
+
+        _no_wrap = std::abs(_height) > cylinder_length / 2.;
+        _no_wrap |= std::abs(_height + _delta_height) > cylinder_length / 2.;
 
         _length = std::sqrt(
-            std::pow(_radius * _delta_angle, 2) +
+            std::pow(radius * circle_wrap._delta_angle, 2) +
             std::pow(_delta_height, 2)
         );
 	}
 
-	SimTK::Vec3 point_on_surface(double t) const {
-		double angle = t * _delta_angle + _angle;
-		double height = t * _delta_height + _height;
+	SimTK::Vec3 compute_point_on_surface(double t) const {
+		const double angle = t * _delta_angle + _angle;
+		const double height = t * _delta_height + _height;
 
 		return SimTK::Vec3(std::cos(angle) * _radius, std::sin(angle) * _radius,
 						   height);
 	}
 
-    int return_code() const {
+    int wrap_action() const {
         // TODO not using: wrapped? = successful wrap, but may not be 'best' path
-        if (_miss) {
+        if (_no_wrap) {
             return WrapObject::WrapAction::noWrap;
         }
-        if (_point_inside_cylinder) {
+        if (_inside_radius) {
             return WrapObject::WrapAction::insideRadius;
         }
         return WrapObject::WrapAction::mandatoryWrap;
     }
 
-    bool wrap_ok() {
-        return !_miss && !_point_inside_cylinder;
+    bool wrap_ok() const {
+        return !_no_wrap && !_inside_radius;
     }
 
-    double wrap_length() {
+    double wrap_length() const {
         return _length;
     }
+
+    // Angle of starting path point on cylinder surface.
+	double _delta_angle = 0. / 0.;
+    // Angle difference between start and final path points on cylinder surface.
+	double _angle = 0. / 0.;
+    // Height of starting path point on cylinder surface.
+	double _height = 0. / 0.;
+    // Height difference between start and final path points on cylinder surface.
+	double _delta_height = 0. / 0.;
+    // Total path length.
+    double _length = 0. / 0.;
+    // Cylinder radius.
+    double _radius = 0. / 0.;
+
+    // Error flags.
+    bool _no_wrap = false;
+    bool _inside_radius = false;
 };
 
 std::ostream& operator<<(std::ostream& os, const ScrewMap& screw) {
     os << "ScrewMap { ";
+    if (screw._no_wrap) {
+        os << "no_wrap }";
+        return os;
+    }
+    if (screw._inside_radius) {
+        os << "inside_radius }";
+        return os;
+    }
     os << "delta_angle: " << screw._delta_angle;
     os << ", ";
     os << "angle: " << screw._angle;
@@ -335,10 +420,6 @@ std::ostream& operator<<(std::ostream& os, const ScrewMap& screw) {
     os << "length: " << screw._length;
     os << ", ";
     os << "radius: " << screw._radius;
-    os << ", ";
-    os << "miss: " << screw._miss;
-    os << ", ";
-    os << "point_inside_cylinder: " << screw._point_inside_cylinder;
     os << " }";
     return os;
 }
@@ -471,7 +552,7 @@ string WrapCylinder::getDimensionsString() const
 int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
                                     const PathWrap& aPathWrap, WrapResult& aWrapResult, bool& aFlag) const
 {
-    ScrewMap screw = ScrewMap(aPoint1, aPoint2, get_radius(), _wrapAxis, _wrapSign);
+    ScrewMap screw = ScrewMap(aPoint1, aPoint2, get_radius(), get_length(), _wrapAxis, _wrapSign);
 
     aWrapResult.wrap_path_length = 0.0;
     aWrapResult.wrap_pts.setSize(0);
@@ -479,8 +560,8 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
 
     if (screw.wrap_ok()) {
         aFlag = true;
-        aWrapResult.r1 = screw.point_on_surface(0.);
-        aWrapResult.r2 = screw.point_on_surface(1.);
+        aWrapResult.r1 = screw.compute_point_on_surface(0.);
+        aWrapResult.r2 = screw.compute_point_on_surface(1.);
 
         aWrapResult.wrap_path_length = screw.wrap_length();
 
@@ -490,7 +571,7 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
         if (numWrapSegments < 1) {numWrapSegments = 1;}
         for (int i = 0; i < numWrapSegments; i++) {
             double t = (double)i / numWrapSegments;
-            aWrapResult.wrap_pts.append(screw.point_on_surface(t));
+            aWrapResult.wrap_pts.append(screw.compute_point_on_surface(t));
         }
     }
 
@@ -543,6 +624,12 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     if (WrapMath::CalcDistanceSquaredPointToLine(aPoint1, p0, dn) < r_squared ||
         WrapMath::CalcDistanceSquaredPointToLine(aPoint2, p0, dn) < r_squared)
     {
+        std::cout << "inside radous wrap\n";
+
+        SimTK_ERRCHK_ALWAYS(screw.wrap_action() == insideRadius,
+            "mandatorywrap",
+            "mandatorywrap not equal"
+        );
         return insideRadius;
     }
 
@@ -565,10 +652,23 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     {
         if (WrapMath::CalcDistanceSquaredBetweenPoints(near12, near00) < r_squared && t12 > 0.0 && t12 < 1.0)
         {
+            SimTK_ERRCHK_ALWAYS(screw.wrap_action() == mandatoryWrap,
+                "mandatorywrap",
+                "mandatorywrap not equal"
+            );
             return_code = mandatoryWrap;
         }
         else
         {
+            static int miss_count = 0;
+            ++miss_count;
+            std::cout << "missed! " << miss_count << "\n";
+            // std::cout << "aPoint1 = " << aPoint1 << "\n";
+            // std::cout << "aPoint2 = " << aPoint2 << "\n";
+            SimTK_ERRCHK_ALWAYS(screw.wrap_action() == noWrap,
+                "nowrap",
+                "nowrap not equal"
+            );
             return noWrap;
         }
     }
@@ -647,6 +747,13 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
                 }
                 else
                 {
+                    std::cout << "nowrap2\n";
+                    std::cout << "wrapAxis = " << _wrapAxis;
+                    std::cout << "wrapSign = " << _wrapSign;
+                    SimTK_ERRCHK_ALWAYS(screw.wrap_action() == noWrap,
+                        "nowrap",
+                        "nowrap not equal"
+                    );
                     return noWrap;
                 }
             }
@@ -916,13 +1023,25 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
     double halfL = get_length() / 2.0;
     if ((aWrapResult.r1[2] < -halfL || aWrapResult.r1[2] > halfL) &&
         (aWrapResult.r2[2] < -halfL || aWrapResult.r2[2] > halfL) )
+        {
+        // std::cout << "dropped off the wrapp\n";
+                    SimTK_ERRCHK_ALWAYS(screw.wrap_action() == noWrap,
+                        "nowrap",
+                        "nowrap not equal"
+                    );
         return noWrap;
+        }
 
     // make the path and calculate the muscle length:
     _make_spiral_path(aPoint1, aPoint2, long_wrap, aWrapResult);
 
     aFlag = true;
 
+    std::cout << "completed wrap: " << return_code << "\n" ;
+    SimTK_ERRCHK_ALWAYS(screw.wrap_action() == return_code,
+        "return_code",
+        "return_code not equal"
+    );
     return return_code;
 }
 
@@ -937,16 +1056,19 @@ int WrapCylinder::wrapLine(const SimTK::State& s, SimTK::Vec3& aPoint1, SimTK::V
  * @param far_side_wrap Boolean indicating if the wrap is the long way around
  * @param aWrapResult The result of the wrapping (tangent points, etc.)
  */
-void WrapCylinder::_make_spiral_path(SimTK::Vec3& aPoint1,
-                                                 SimTK::Vec3& aPoint2,
-                                                 bool far_side_wrap,
-                                                 WrapResult& aWrapResult) const
+void WrapCylinder::_make_spiral_path(
+    SimTK::Vec3& aPoint1,
+    SimTK::Vec3& aPoint2,
+    bool far_side_wrap,
+    WrapResult& aWrapResult) const
 {
+    // std::cout << "start spiral path\n";
+    const double _radius = get_radius();
+
     double x, y, t, axial_dist, theta;
     Vec3 r1a, r2a, uu, vv, ax, axial_vec, wrap_pt;
     double sense = far_side_wrap ? -1.0 : 1.0;
     int i, iterations = 0;
-    const double _radius = get_radius();
 
 restart_spiral_wrap:
 
@@ -996,6 +1118,10 @@ restart_spiral_wrap:
     // WrapTorus creates a WrapCyl with no connected model, avoid this hack
     if (!_model.empty() && !getModel().getDisplayHints().isVisualizationEnabled() &&
             aWrapResult.singleWrap) {
+        SimTK_ERRCHK_ALWAYS(false,
+            "wraptoruswhatever",
+            "%s: no idea");
+        
         // Use one WrapSegment/cord instead of finely sampled list of wrap_pt(s)
         _calc_spiral_wrap_point(
                 r1a, axial_vec, m, ax, sense, 0, theta, wrap_pt);
@@ -1012,6 +1138,7 @@ restart_spiral_wrap:
 
         for (i = 0; i < numWrapSegments; i++) {
             double t = (double)i / numWrapSegments;
+            // std::cout << " t = " << t << ", ";
 
             _calc_spiral_wrap_point(
                     r1a, axial_vec, m, ax, sense, t, theta, wrap_pt);
@@ -1033,6 +1160,7 @@ restart_spiral_wrap:
                         aPoint2, dn, aWrapResult.r2, temp_wrap_pt);
 
                 if (did_adjust_r1 || did_adjust_r2) {
+                    // std::cout << "ever do any iterations" << iterations << "\n";
                     iterations++;
                     goto restart_spiral_wrap;
                 }
@@ -1041,6 +1169,82 @@ restart_spiral_wrap:
             aWrapResult.wrap_pts.append(wrap_pt);
         }
     }
+    static double maxLengthErr =0.;
+
+    bool mapSense = _wrapSign > 0;
+
+    ScrewMap map0 = ScrewMap(aPoint1, aPoint2, get_radius(), get_length(), _wrapAxis, _wrapSign);
+
+    double lengthErr = std::abs(aWrapResult.wrap_path_length - map0._length);
+    std::cout << "lengtErr = " << lengthErr << "\n";
+
+    std::cout << "// Wrapping";
+    std::cout << "\n    ";
+    std::cout << "// screw = " << map0;
+    std::cout << "\n    ";
+    std::cout << "let radius = " << _radius <<";";
+    std::cout << "\n    ";
+    std::cout << "let sense = " << sense << ";";
+    std::cout << "// ";
+    std::cout << "wrapSign = " << _wrapSign;
+    std::cout << ", ";
+    std::cout << "far_side_wrap = " << far_side_wrap;
+    std::cout << ", ";
+    std::cout << "iterations = " << iterations;
+    std::cout << "\n    ";
+    std::cout << "// map._angle = " << map0._angle;
+    std::cout << "\n    ";
+    std::cout << "// map.delta_angle = " << map0._delta_angle;
+    std::cout << "\n    ";
+    std::cout << "// map._height = " << map0._height;
+    std::cout << "\n    ";
+    std::cout << "// map._delta_height = " << map0._delta_height;
+    std::cout << "\n    ";
+    std::cout << "let p0 = Vector3::new(" << aPoint1 << ");";
+    std::cout << "\n    ";
+    std::cout << "let p1 = Vector3::new(" << aPoint2 << ");";
+    std::cout << "\n    ";
+
+    Vec3 wrap_pt0;
+    double tvals[5] = {0., 0.25, 0.5, 0.75, 1.};
+    for (int i =0; i < 5; ++i) {
+        _calc_spiral_wrap_point(r1a, axial_vec, m, ax, sense, tvals[i], theta, wrap_pt0);
+        std::cout << "let q" << i << " = Vector3::new(";
+        std::string delim = "";
+        for (int j =0; j < 3; ++j) {
+            std::cout << delim << wrap_pt0[j];
+            delim = ", ";
+        }
+        std::cout << ");\n    ";
+    }
+
+    for (int i =0; i < 5; ++i) {
+        SimTK::Vec3 check_pt0 = map0.compute_point_on_surface(tvals[i]);
+        std::cout << "let c" << i << " = Vector3::new(";
+        std::string delim = "";
+        for (int j =0; j < 3; ++j) {
+            std::cout << delim << check_pt0[j];
+            delim = ", ";
+        }
+        std::cout << ");\n    ";
+    }
+
+    std::cout << "//len = " << aWrapResult.wrap_path_length;
+    std::cout << ", ";
+    std::cout << "//check_len = " << map0._length;
+    std::cout << ", ";
+    std::cout << "//lengthErr = " << lengthErr;
+    std::cout << "\n    ";
+    std::cout << "//lengthErr = " << lengthErr;
+    std::cout << "\n    ";
+
+    maxLengthErr = std::max(maxLengthErr, lengthErr);
+    std::cout << ", ";
+    std::cout << "maxLengthErr = " << maxLengthErr;
+    std::cout << std::endl;
+        SimTK_ERRCHK_ALWAYS(maxLengthErr < 0.05,
+            "wrap_points",
+            "lengthError to huge");
 }
 
 //_____________________________________________________________________________
