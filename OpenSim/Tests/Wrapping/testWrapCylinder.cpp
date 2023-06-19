@@ -20,7 +20,7 @@
  * See the License for the specific language governing permissions and        *
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
-// INCLUDE
+
 #include <OpenSim/OpenSim.h>
 #include <OpenSim/Auxiliary/auxiliaryTestFunctions.h>
 
@@ -69,66 +69,81 @@ struct WrapInput final {
 struct WrappingTolerances final {
     double point_error;
     double length_error;
+    double gradient_error;
 };
 
-struct CylindricalCoordinates final {
-    CylindricalCoordinates() {}
-
-    CylindricalCoordinates( //TODO why this, also change the names
-        double radius,
-        double angle,
-        double position_on_axis) :
-        radius(radius),
-        angle(angle),
-        position_on_axis(position_on_axis)
-    {}
-
-    // Convert to Cylindrical Coordinates with angle within [0, 2pi].
-    CylindricalCoordinates(const SimTK::Vec3& point):
-        angle(std::atan2(point[1], point[0])),
-        radius(SimTK::Vec2(point[1], point[0]).norm()),
-        position_on_axis(point[2])
+// Angle defined on range [0, 2pi].
+struct Angle {
+    Angle(SimTK::Vec2 point):
+        _value(std::atan2(point[1], point[0]))
     {
-        wrap_angle();
+        wrap();
     }
 
-    void wrap_angle() {
-        if (angle < 0.) {
-            angle += 2. * M_PI;
+    double get_value() const {
+        return _value;
+    }
+
+    private:
+    void wrap() {
+        _value = (_value < 0. )? _value + 2. * M_PI: _value;
+    }
+
+    double _value;
+};
+
+struct AngleDifference {
+    double get_value(const WrappingSign& sign) {
+        if (sign.is_positive()) {
+            return positive_direction;
         }
     }
 
-    CylindricalCoordinates operator-()
-    {
-        return CylindricalCoordinates {
-            radius,
-            -angle,
-            -position_on_axis
+    double positive_direction;
+    double negative_direction;
+};
+
+AngleDifference operator-(const Angle& lhs, const Angle& rhs) {
+    double delta = lhs.get_value() - rhs.get_value();
+    if (delta < 0.) {
+        return AngleDifference{
+            delta + 2. * M_PI,
+            delta
         };
-    }
+    };
+    return AngleDifference {
+        delta,
+        delta - 2. * M_PI
+    };
+}
+
+struct CylindricalCoordinates final {
+    CylindricalCoordinates(const SimTK::Vec3& point):
+        angle(SimTK::Vec2(point[0], point[1])),
+        radius(SimTK::Vec2(point[0], point[1]).norm()),
+        position_on_axis(point[2])
+    {}
 
     double radius;
-    double angle;
+    Angle angle;
     double position_on_axis;
 };
 
-// Difference between cylindrical coordinates.
-//
-// Assumes radius of lhs equals that of rhs.
-// Returns angle difference in range [0, 2pi].
-CylindricalCoordinates operator-(
-    const CylindricalCoordinates& lhs,
-    const CylindricalCoordinates& rhs
-) {
-    ASSERT(lhs.radius == rhs.radius);
+struct CylindricalCoordinatesDifference final {
+    double radial;
+    AngleDifference angular;
+    double along_axis;
+};
 
-    CylindricalCoordinates diff (
-        lhs.radius,
+CylindricalCoordinatesDifference operator-(
+    const CylindricalCoordinates& lhs,
+    const CylindricalCoordinates& rhs)
+{
+    return CylindricalCoordinatesDifference {
+        lhs.radius - rhs.radius,
         lhs.angle - rhs.angle,
         lhs.position_on_axis - rhs.position_on_axis
-    );
-    diff.wrap_angle();
-    return diff;
+    };
 }
 
 // The direction in which the cylinder is wrapped along its axis.
@@ -165,11 +180,11 @@ struct WrappingSign final {
     }
 
     bool is_positive() const {
-        return _is_positive;
+        return _is_positive && !_is_negative;
     }
 
     bool is_negative() const {
-        return _is_negative;
+        return _is_negative && !_is_positive;
     }
 
     bool is_inconsistent() const {
@@ -197,8 +212,8 @@ struct WrappingSign final {
 bool operator==(
     const WrappingSign& lhs,
     const WrappingSign& rhs) {
-    return lhs.is_positive() == rhs.is_positive()
-        && lhs.is_negative() == rhs.is_negative();
+    return lhs._is_positive == rhs._is_positive
+        && lhs._is_negative == rhs._is_negative;
 }
 
 // Memberwise OR.
@@ -227,7 +242,7 @@ struct WrapTestResult final {
     bool no_wrap = true;
 };
 
-WrapTestResult solve(const WrapInput& input, bool visualize = false) {
+WrapTestResult solve(const WrapInput& input, bool visualize) {
     Model model;
     model.setName("testCylinderWrapping");
 
@@ -265,21 +280,21 @@ WrapTestResult solve(const WrapInput& input, bool visualize = false) {
     }
 
     // Determine the wrapping sign based on the shortest path between consecutive points.
-    // This is easier than asserting exact positions of intermediate path
-    // points, while still capturing information for testing.
     SimTK::Rotation cylinder_orientation;
     cylinder_orientation.setRotationToBodyFixedXYZ(input.orientation);
     PathPoints consecutive_points =
         PathPoints{
-            wrap_result.r1,
-            wrap_result.r1
+            input.path.start,
+            input.path.start
         };
     WrappingSign sign;
+    wrap_result.wrap_pts.insert(0, wrap_result.r1);
     wrap_result.wrap_pts.append(wrap_result.r2);
+    wrap_result.wrap_pts.append(input.path.end);
     for (int i = 0; i < wrap_result.wrap_pts.size(); ++i) {
         consecutive_points.start = consecutive_points.end;
         consecutive_points.end = wrap_result.wrap_pts[i];
-        sign = sign || WrappingSign(cylinder_orientation.transpose() * consecutive_points);
+        sign = sign || WrappingSign(cylinder_orientation.invert() * consecutive_points);
     }
     return WrapTestResult {
         PathPoints{wrap_result.r1, wrap_result.r2}, sign
@@ -290,18 +305,31 @@ explicit bool IsEqual(double lhs, double rhs, double tolerance) {
     return std::abs(lhs - rhs) < tolerance;
 }
 
+explicit bool IsEqual(const SimTK::UnitVec3& lhs, const SimTK::UnitVec3& rhs, double tolerance) {
+    return IsEqual(lhs[0], rhs[0], tolerance)
+        && IsEqual(lhs[1], rhs[1], tolerance)
+        && IsEqual(lhs[2], rhs[2], tolerance);
+}
+
 explicit bool IsEqual(const SimTK::Vec3& lhs, const SimTK::Vec3& rhs, double tolerance) {
-    return SimTK::max(SimTK::abs(lhs - rhs)) < tolerance;
+    return IsEqual(lhs[0], rhs[0], tolerance)
+        && IsEqual(lhs[1], rhs[1], tolerance)
+        && IsEqual(lhs[2], rhs[2], tolerance);
+}
+
+explicit bool IsEqual(const PathPoints<>& lhs, const PathPoints<>& rhs, double tolerance) {
+    return IsEqual(lhs.start, rhs.start, tolerance)
+        && IsEqual(lhs.end, rhs.end, tolerance);
 }
 
 explicit bool IsEqual(const WrapTestResult& lhs, const WrapTestResult& rhs, double tolerance) {
     if (lhs.no_wrap && rhs.no_wrap) {
         return true;
     }
-    return lhs.no_wrap == rhs.no_wrap
+    return IsEqual(lhs.path, rhs.path, tolerance)
+        && IsEqual(lhs.length, rhs.length, tolerance) // TODO: or use Tolerance.length_error
         && lhs.sign == rhs.sign
-        && IsEqual(lhs.path.start, rhs.path.start, tolerance)
-        && IsEqual(lhs.path.end, rhs.path.end, tolerance);
+        && lhs.no_wrap == rhs.no_wrap;
 }
 
 bool TestWrapping(
@@ -354,35 +382,35 @@ bool TestWrapping(
     // =============== Expected wrapping length. =======================
     // =================================================================
 
-    // Just compute both path lengths.
+    WrappingSign sign = result.sign;
 
-    auto TraversedCylindricalCoords = [&](
-        const PathPoints<>& path,
-        const WrappingSign& sign) -> CylindricalCoordinates
+    auto ComputeWrappedPathLength = [&](
+        const PathPoints<>& wrapped_path) -> double
     {
         PathPoints<CylindricalCoordinates> path_in_cylinder_frame(
-            cylinder_orientation * path);
-        return sign.is_positive()?
-            path_in_cylinder_frame.end - path_in_cylinder_frame.start:
-            -(path_in_cylinder_frame.start - path_in_cylinder_frame.end);
+            cylinder_orientation * wrapped_path);
+
+        CylindricalCoordinatesDifference difference =
+            path_in_cylinder_frame.end -
+            path_in_cylinder_frame.start;
+
+        return std::sqrt(
+                std::pow(difference.angular.get_value(sign) * input.radius, 2) +
+                std::pow(difference.along_axis, 2)
+            );
     };
 
     auto ComputePathLength = [&](
-        const PathPoints<>& wrapped_path,
-        const WrappingSign& sign) -> double
+        const PathPoints<>& wrapped_path) -> double
     {
-        CylindricalCoordinates delta = TraversedCylindricalCoords(wrapped_path, sign);
         return
             (input.path.start - wrapped_path.start).norm() +
-            std::sqrt(
-                std::pow(delta.angle * delta.radius, 2) +
-                std::pow(delta.position_on_axis, 2)
-            ) +
+            ComputeWrappedPathLength(wrapped_path) +
             (wrapped_path.end - input.path.end).norm();
     };
 
-    if (!IsEqual(ComputePathLength(result.path, result.sign), result.length, 1e-10) ||
-        !IsEqual(ComputePathLength(expected.path, expected.sign), expected.length, 1e-10) ||
+    if (!IsEqual(ComputePathLength(result.path), result.length, 1e-10) ||
+        !IsEqual(ComputePathLength(expected.path), expected.length, 1e-10) ||
         !IsEqual(result.length, expected.length, tol.length_error))
     {
         return false;
@@ -392,319 +420,98 @@ bool TestWrapping(
     // =============== Test: Is path tangent to surface? ===============
     // =================================================================
 
+    // Compute surface gradient along path.
+    auto ComputeSurfaceGradient = [&](
+        const PathPoints<>& wrapped_path,
+        double t // Between [0, 1] = [start, end]
+    ) -> SimTK::Vec3 {
+        PathPoints<CylindricalCoordinates> path_in_cylinder_frame(
+            cylinder_orientation * wrapped_path);
 
-        // Compute surface gradient at a cylindrical angle coordinate.
-        auto ComputeSurfaceGradient = [&](
-            double angle
-        ) -> SimTK::Vec3 {
-            SimTK::Rotation rot_about_axis;
-            rot_about_axis.setRotationFromAngleAboutZ(angle);
-            return cylinder_orientation *
-                rot_about_axis * (
-                    SimTK::Vec3(0., 1., 0.) * radius
-                    + SimTK::Vec3(0., 0., 1.)
-                    * delta_surface_coords.position_along_axis / delta_surface_coords.angle
-                );
-        };
+        CylindricalCoordinatesDifference difference =
+            path_in_cylinder_frame.end -
+            path_in_cylinder_frame.start;
 
-        // Path gradient direction at start-point must equal that at surface.
-        ASSERT_EQUAL<SimTK::UnitVec3>(
-            SimTK::UnitVec3(wrap_result.r1 - start_point),
-            SimTK::UnitVec3(ComputeSurfaceGradient(start_surface_coords.angle)),
-            1e-10
-        );
+        double angle = path_in_cylinder_frame.start.angle.get_value() +
+            difference.angular.get_value(sign) * t;
 
-        // Path gradient direction at end-point must equal that at surface.
-        ASSERT_EQUAL<SimTK::UnitVec3>(
-            SimTK::UnitVec3(ComputeSurfaceGradient(end_surface_coords.angle)),
-            SimTK::UnitVec3(end_point - wrap_result.r2),
-            1e-10
-        );
+        SimTK::Rotation rot_about_axis;
+        rot_about_axis.setRotationFromAngleAboutZ(angle);
 
-        // =================================================================
-        // =============== Test: Constant gradient along cylinder axis =====
-        // =================================================================
-
-
-        // =================================================================
-        // =============== Test: Constant gradient along cylinder axis =====
-        // =================================================================
-    }
-
-// Fill in this form to test WrapCylinder::wrapLine()
-//
-// Performed tests:
-// - Expected wrap-action must match.
-// - Path must be tangent to surface at start and end surface points.
-// - Projected path to XY-plane must be a circle (for the surface part).
-// - Z-coordinate of path must have constant gradient.
-struct WrapCylinderTestCase final {
-    // Name of this test.
-    std::string name;
-    bool visualize = false;
-
-    // The expected answers.
-    bool expected_no_wrap = false;
-    bool expected_positive_wrapping_direction = true;
-    SimTK::Vec3 expected_start_point_on_surface;
-    SimTK::Vec3 expected_end_point_on_surface;
-    double expected_path_length;
-
-    // Assertion bounds:
-
-    private:
-    // Local cylindrical coordinates for points on cylinder surface.
-    struct CylindricalPathCoordinates final {
-        double angle;
-        double position_along_axis;
-
-        CylindricalPathCoordinates() = default;
-
-        CylindricalPathCoordinates(
-            SimTK::Rotation cylinder_orientation,
-            SimTK::Vec3 point_on_surface
-        ) {
-            SimTK::Vec3 point_local =
-            cylinder_orientation.transpose() * point_on_surface;
-            angle = std::atan2(point_local[1], point_local[0]);
-            position_along_axis = point_local[2];
-        }
-
-        CylindricalPathCoordinates operator-(
-            const CylindricalPathCoordinates& rhs
-        ) const {
-            CylindricalPathCoordinates diff;
-            diff.angle = angle - rhs.angle;
-            diff.position_along_axis =
-                position_along_axis - rhs.position_along_axis;
-            return diff;
-        }
+        return cylinder_orientation *
+            rot_about_axis * (
+                SimTK::Vec3(0., 1., 0.) * input.radius
+                * difference.angular.get_value(sign)
+                + SimTK::Vec3(0., 0., 1.)
+                * difference.along_axis
+            );
     };
 
-    public:
-    void do_test(
-        SimTK::Array_<std::string> failures
-    ) const {
-        try {
-            do_test();
-        }
-        catch (const std::exception& e) {
-            std::cout << "Exception: " << e.what() << std::endl;
-            failures.push_back("TestWrapCylinder: case " + name);
-        }
+    auto TestGradientDirection = [&](
+        const PathPoints<>& wrapped_path,
+        double tolerance
+    ) -> bool {
+        return
+            IsEqual(
+                SimTK::UnitVec3(result.path.start - input.path.start),
+                SimTK::UnitVec3(ComputeSurfaceGradient(result.path, 0.)),
+                tolerance) &&
+            IsEqual(
+                SimTK::UnitVec3(input.path.end - result.path.end),
+                SimTK::UnitVec3(ComputeSurfaceGradient(result.path, 1.)),
+                tolerance);
+    };
+
+    if (!TestGradientDirection(result.path, tol.gradient_error) ||
+        !TestGradientDirection(expected.path, 1e-10))
+    {
+        return false;
     }
 
-    void do_test() const {
-        Model model;
-        model.setName("testCylinderWrapping");
+    // =================================================================
+    // =============== Test: Constant gradient along cylinder axis =====
+    // =================================================================
 
-        WrapCylinder* cylinder = new WrapCylinder();
-        cylinder->setName("cylinder");
-        cylinder->set_radius(radius);
-        cylinder->set_length(length);
-        cylinder->set_quadrant(quadrant);
-        cylinder->set_xyz_body_rotation(orientation);
-        cylinder->setFrame(model.getGround());
-        model.updGround().addWrapObject(cylinder);
-
-        PathSpring* spring = new PathSpring("spring", 1., 1., 1.);
-        spring->updGeometryPath().appendNewPathPoint("start_point", model.get_ground(), start_point);
-        spring->updGeometryPath().appendNewPathPoint("end_point", model.get_ground(), end_point);
-        spring->updGeometryPath().addPathWrap(*cylinder);
-        model.addComponent(spring);
-
-        model.finalizeConnections();
-        model.setUseVisualizer(visualize);
-
-        SimTK::State& state = model.initSystem();
-        model.realizeVelocity(state);
-        if (visualize) {
-            model.getVisualizer().show(state);
-        }
-
-        WrapResult wrap_result =
-            spring->get_GeometryPath().getWrapSet().get("pathwrap").getPreviousWrap();
-
-        // =================================================================
-        // =============== Test: Expected wrapping action. =================
-        // =================================================================
-
-        if (expected_no_wrap) {
-            ASSERT(wrap_result.wrap_pts.size() == 0);
-            ASSERT_EQUAL(wrap_result.wrap_path_length, 0., 1e-10);
-            return;
-        } else {
-            ASSERT(wrap_result.wrap_pts.size() > 0);
-        }
-
-        // =================================================================
-        // =============== Test: Match expected points =====================
-        // =================================================================
-
-        ASSERT_EQUAL<SimTK::Vec3>(
-            wrap_result.r1,
-            expected_start_point_on_surface,
-            1e-10);
-
-        ASSERT_EQUAL<SimTK::Vec3>(
-            wrap_result.r2,
-            expected_end_point_on_surface,
-            1e-10);
-
-        // =================================================================
-        // =============== Test: Points on circle. =========================
-        // =================================================================
-
-        SimTK::Rotation cylinder_orientation;
-        cylinder_orientation.setRotationToBodyFixedXYZ(orientation);
-
-        auto assert_point_on_surface = [&](
-            const SimTK::Vec3& point
-        ) -> void {
-            SimTK::Vec3 point_local =
-                cylinder_orientation * point;
-            ASSERT_EQUAL<double>(
-                SimTK::Vec2(
-                    point_local[0],
-                    point_local[1]).norm(),
-                radius,
-                1e-10);
-        };
-
-        assert_point_on_surface(wrap_result.r1);
-        assert_point_on_surface(wrap_result.r2);
-
-        for (size_t i = 0; i < wrap_result.wrap_pts.size(); ++i ) {
-            assert_point_on_surface(wrap_result.wrap_pts[i]);
-        }
-
-        // =================================================================
-        // =============== Expected wrapping length. =======================
-        // =================================================================
-
-        // Compute surface coordinates in local cylindrical coordinates.
-        CylindricalPathCoordinates start_surface_coords(
-            cylinder_orientation,
-            wrap_result.r1);
-        CylindricalPathCoordinates end_surface_coords(
-            cylinder_orientation,
-            wrap_result.r2);
-
-        // Traversed cylinderical coordinates.
-        CylindricalPathCoordinates delta_surface_coords =
-            end_surface_coords - start_surface_coords;
-
-        // Remove any wrapping to correctly compute the traversed angle.
-        if (expected_positive_wrapping_direction &&
-            delta_surface_coords.angle < 0)
-        {
-            delta_surface_coords.angle += 2. * M_PI;
-        }
-        if (!expected_positive_wrapping_direction &&
-            delta_surface_coords.angle > 0)
-        {
-            delta_surface_coords.angle -= 2. * M_PI;
-        }
-
-        // Length supposing that r1, and r2 in wrap_result are correct:
-        double path_length_check =
-            (start_point - wrap_result.r1).norm() + // Point-a to surface.
-            std::sqrt( // Path on cylinder surface.
-                std::pow(delta_surface_coords.angle * radius, 2) +
-                std::pow(delta_surface_coords.position_along_axis,2)
-            ) +
-            (end_point - wrap_result.r2).norm(); // Point-b to surface.
-
-        ASSERT_EQUAL<double>(wrap_result.wrap_path_length, path_length_check, 1e-10);
-        ASSERT_EQUAL<double>(wrap_result.wrap_path_length, expected_path_length, 1e-10);
-
-        // =================================================================
-        // =============== Test: Is path tangent to surface? ===============
-        // =================================================================
-
-        // Compute surface gradient at a cylindrical angle coordinate.
-        auto ComputeSurfaceGradient = [&](
-            double angle
-        ) -> SimTK::Vec3 {
-            SimTK::Rotation rot_about_axis;
-            rot_about_axis.setRotationFromAngleAboutZ(angle);
-            return cylinder_orientation *
-                rot_about_axis * (
-                    SimTK::Vec3(0., 1., 0.) * radius
-                    + SimTK::Vec3(0., 0., 1.)
-                    * delta_surface_coords.position_along_axis / delta_surface_coords.angle
-                );
-        };
-
-        // Path gradient direction at start-point must equal that at surface.
-        ASSERT_EQUAL<SimTK::UnitVec3>(
-            SimTK::UnitVec3(wrap_result.r1 - start_point),
-            SimTK::UnitVec3(ComputeSurfaceGradient(start_surface_coords.angle)),
-            1e-10
-        );
-
-        // Path gradient direction at end-point must equal that at surface.
-        ASSERT_EQUAL<SimTK::UnitVec3>(
-            SimTK::UnitVec3(ComputeSurfaceGradient(end_surface_coords.angle)),
-            SimTK::UnitVec3(end_point - wrap_result.r2),
-            1e-10
-        );
-
-        // =================================================================
-        // =============== Test: Constant gradient along cylinder axis =====
-        // =================================================================
-
-
-        // =================================================================
-        // =============== Test: Constant gradient along cylinder axis =====
-        // =================================================================
-    }
-};
+}
 
 int main()
 {
-    SimTK::Array_<std::string> failures;
+    WrappingTolerances tolerance {
+        1e-10,
+        1e-10,
+        1e-10
+    };
 
     {
-        WrapCylinderTestCase testCase;
-        testCase.name = "Unconstrained Miss";
-        testCase.radius = 0.5;
-        testCase.length = 1.;
-        testCase.quadrant = "unconstrained";
-        testCase.orientation = {0., 0., 0.};
-        testCase.start_point = {1., 2., 3.};
-        testCase.end_point = {1, -2, -3.};
+        WrapInput input {
+            0.5, // radius;
+            1., // length;
+            "+x", // quadrant;
+            SimTK::Vec3 {0., 0., 0.}, // orientation;
+            PathPoints<> {
+                SimTK::Vec3 {1., 2., 3.},
+                SimTK::Vec3 {1., -2., -3.}
+            }
+        };
 
-        testCase.expected_no_wrap = true;
-        testCase.visualize = true;
+        WrapTestResult expected {
+            PathPoints<> {
+                SimTK::Vec3 {1., 2., 3.},
+                SimTK::Vec3 {1., -2., -3.}
+            },
+            WrappingSign::Positive(),
+            0.1,
+        };
 
-        testCase.do_test(failures);
+        ASSERT(TestWrapping(input, expected, tolerance));
     }
 
     {
-        WrapCylinderTestCase testCase;
-        testCase.name = "Unconstrained Miss";
-        testCase.radius = 1.;
-        testCase.length = 1.;
-        testCase.quadrant = "+x";
-        testCase.orientation = {0., 0., 0.};
-        testCase.start_point = {1., 2., 3.};
-        testCase.end_point = {1, -2, -3.};
-
-        testCase.expected_no_wrap = true;
-        testCase.expected_positive_wrapping_direction = true;
-        testCase.expected_start_point_on_surface = {1., 2., 3.};
-        testCase.expected_end_point_on_surface = {1., 2., 3.};
-        testCase.expected_path_length = 1.;
-        testCase.visualize = true;
-
-        testCase.do_test(failures);
+        // TODO more cases
+        // ...
     }
 
-    if (!failures.empty()) {
-        std::cout << "Done, with failure(s): " << failures << std::endl;
-        return 1;
-    }
+    // TODO report on failures...
 
     std::cout << "Done" << std::endl;
     return 0;
