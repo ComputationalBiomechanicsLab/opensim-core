@@ -401,9 +401,6 @@ namespace {
         const WrappingTolerances& tol,
         const std::string& name)
     {
-        auto IsZero = [](double x, double tol) -> bool {
-            return std::abs(x) <= tol;
-        };
         std::ostringstream oss;
         std::string delim = "\n        ";
 
