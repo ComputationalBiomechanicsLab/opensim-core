@@ -419,7 +419,7 @@ namespace {
         );
 
         double error = std::abs(geodesicPath.getRadius() - input.radius);
-        if (error < tol.position) {
+        if (error > tol.position) {
             oss << delim << name << ": Distance to surface error = " << error <<
                 " exceeds tolerance = " << tol.position;
         }
@@ -432,7 +432,7 @@ namespace {
         // via the CylinderGeodesic.
 
         error = std::abs(geodesicPath.computeLength() - result.length);
-        if (error < tol.length) {
+        if (error > tol.length) {
             oss << delim << name << ": Length error = " << error <<
                 " exceeds tolerance = " << tol.length;
         }
