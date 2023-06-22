@@ -103,102 +103,13 @@ namespace {
         double angle;
         double axialPosition;
     };
-}
 
-// Section with helpers for evaluating the wrapping result in the upcoming tests.
-namespace {
-
-    // Struct for holding the result of the wrapping solution.
-    struct WrapTestResult final {
-
-        static WrapTestResult NoWrap() {
-            WrapTestResult noWrap;
-            noWrap.noWrap = true;
-            return noWrap;
-        }
-
-        // Path points on cylinder surface.
-        PathSegmentVec3 path = {{}, {}};
-        // Path segment length on cytlinder surface.
-        double length = NAN;
-        // Direction of wrapping wrt cylinder axis.
-        bool positiveDirection = true;
-        // If there is no wrapping (the other fields don't matter).
-        bool noWrap = false;
-    };
-
-    std::ostream& operator<<(std::ostream& os, const WrapTestResult& result) {
-        if (result.noWrap) {
-            return os << "WrapTestResult { noWrap = true }";
-        }
-        return os <<
-            "WrapTestResult{" <<
-            "path.start: " << result.path.start << ", " <<
-            "path.end: " << result.path.end << ", " <<
-            "length: " << result.length << ", " <<
-            "positiveDirection: " << result.positiveDirection << "}";
-    }
-
-    // Struct holding the tolerances when asserting the wrapping result.
-    struct WrappingTolerances final {
-        WrappingTolerances() = default;
-
-        WrappingTolerances(double eps):
-            position(eps),
-            length(eps),
-            gradientDirection(eps)
-        {}
-
-        double position = 1e-3;
-        double length = 1e-9;
-        double gradientDirection = 1e-3;
-    };
-
-    std::ostream& operator<<(std::ostream& os, const WrappingTolerances& tol) {
-        return os <<
-            "WrappingTolerances {" <<
-            "position: " << tol.position << ", " <<
-            "length: " << tol.length << ", " <<
-            "gradientDirection: " << tol.gradientDirection << "}";
-    }
-
-    bool IsEqual(double lhs, double rhs, double tolerance) {
-        return std::abs(lhs - rhs) < tolerance;
-    }
-
-    bool IsEqual(const SimTK::Vec3& lhs, const SimTK::Vec3& rhs, double tolerance) {
-        return IsEqual(lhs[0], rhs[0], tolerance)
-            && IsEqual(lhs[1], rhs[1], tolerance)
-            && IsEqual(lhs[2], rhs[2], tolerance);
-    }
-
-    bool IsEqual(const PathSegmentVec3& lhs, const PathSegmentVec3& rhs, double tolerance) {
-        return IsEqual(lhs.start, rhs.start, tolerance)
-            && IsEqual(lhs.end, rhs.end, tolerance);
-    }
-
-    bool IsEqual(const WrapTestResult& lhs, const WrapTestResult& rhs, double tolerance) {
-        if (lhs.noWrap && rhs.noWrap) {
-            return true;
-        }
-        return IsEqual(lhs.path, rhs.path, tolerance)
-            && IsEqual(lhs.length, rhs.length, tolerance) // TODO: or use Tolerance.length_error
-            && lhs.positiveDirection == rhs.positiveDirection
-            && lhs.noWrap == rhs.noWrap;
-    }
-
-    double ErrorInfinityNorm(const SimTK::UnitVec3& lhs, const SimTK::UnitVec3& rhs) {
-        return SimTK::max(( lhs.asVec3() - rhs.asVec3() ).abs());
-    }
-}
-
-// This section contains a geodesic path definition on a cylindrical surface.
-// The wrapping problem is not solved here, instead the geodesic is constructed
-// from a wrapping result, and allows for the surface gradient and path length
-// to be evaluated. These values can then be used for asserting correctness of
-// the obtained result.
-namespace {
-
+    // A geodesic path definition on a cylindrical surface.
+    //
+    // The wrapping problem is not solved here, instead the geodesic is constructed
+    // given a wrapping result, and allows for the surface gradient and path length
+    // to be evaluated. These values can then be used for asserting correctness of
+    // the given wrapping result.
     class CylinderGeodesic final {
 
         CylinderGeodesic(
@@ -292,6 +203,93 @@ namespace {
         SimTK::Rotation _cylinderOrientation;
     };
 
+}
+
+// Section with helpers for evaluating the wrapping result in the upcoming tests.
+namespace {
+
+    // Struct for holding the result of the wrapping solution.
+    struct WrapTestResult final {
+
+        static WrapTestResult NoWrap() {
+            WrapTestResult noWrap;
+            noWrap.noWrap = true;
+            return noWrap;
+        }
+
+        // Path points on cylinder surface.
+        PathSegmentVec3 path = {{}, {}};
+        // Path segment length on cytlinder surface.
+        double length = NAN;
+        // Direction of wrapping wrt cylinder axis.
+        bool positiveDirection = true;
+        // If there is no wrapping (the other fields don't matter).
+        bool noWrap = false;
+    };
+
+    std::ostream& operator<<(std::ostream& os, const WrapTestResult& result) {
+        if (result.noWrap) {
+            return os << "WrapTestResult { noWrap = true }";
+        }
+        return os <<
+            "WrapTestResult{" <<
+            "path.start: " << result.path.start << ", " <<
+            "path.end: " << result.path.end << ", " <<
+            "length: " << result.length << ", " <<
+            "positiveDirection: " << result.positiveDirection << "}";
+    }
+
+    // Struct holding the tolerances when asserting the wrapping result.
+    struct WrappingTolerances final {
+        WrappingTolerances() = default;
+
+        WrappingTolerances(double eps):
+            position(eps),
+            length(eps),
+            gradientDirection(eps)
+        {}
+
+        double position = 1e-3;
+        double length = 1e-9;
+        double gradientDirection = 1e-3;
+    };
+
+    std::ostream& operator<<(std::ostream& os, const WrappingTolerances& tol) {
+        return os <<
+            "WrappingTolerances {" <<
+            "position: " << tol.position << ", " <<
+            "length: " << tol.length << ", " <<
+            "gradientDirection: " << tol.gradientDirection << "}";
+    }
+
+    bool IsEqual(double lhs, double rhs, double tolerance) {
+        return std::abs(lhs - rhs) < tolerance;
+    }
+
+    bool IsEqual(const SimTK::Vec3& lhs, const SimTK::Vec3& rhs, double tolerance) {
+        return IsEqual(lhs[0], rhs[0], tolerance)
+            && IsEqual(lhs[1], rhs[1], tolerance)
+            && IsEqual(lhs[2], rhs[2], tolerance);
+    }
+
+    bool IsEqual(const PathSegmentVec3& lhs, const PathSegmentVec3& rhs, double tolerance) {
+        return IsEqual(lhs.start, rhs.start, tolerance)
+            && IsEqual(lhs.end, rhs.end, tolerance);
+    }
+
+    bool IsEqual(const WrapTestResult& lhs, const WrapTestResult& rhs, double tolerance) {
+        if (lhs.noWrap && rhs.noWrap) {
+            return true;
+        }
+        return IsEqual(lhs.path, rhs.path, tolerance)
+            && IsEqual(lhs.length, rhs.length, tolerance) // TODO: or use Tolerance.length_error
+            && lhs.positiveDirection == rhs.positiveDirection
+            && lhs.noWrap == rhs.noWrap;
+    }
+
+    double ErrorInfinityNorm(const SimTK::UnitVec3& lhs, const SimTK::UnitVec3& rhs) {
+        return SimTK::max(( lhs.asVec3() - rhs.asVec3() ).abs());
+    }
 }
 
 // Section on configuring and simulating a specific wrapping scenario.
