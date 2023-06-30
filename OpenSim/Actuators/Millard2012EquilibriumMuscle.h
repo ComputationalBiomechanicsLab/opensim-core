@@ -226,6 +226,8 @@ public:
         "Passive-force-length curve.");
     OpenSim_DECLARE_UNNAMED_PROPERTY(TendonForceLengthCurve,
         "Tendon-force-length curve.");
+    OpenSim_DECLARE_PROPERTY(use_tendon_force_state, bool,
+        "Use tendon force as state.");
 
 //==============================================================================
 // OUTPUTS
@@ -413,6 +415,10 @@ public:
         @param fiberLength The desired fiber length (m). */
     void setFiberLength(SimTK::State& s, double fiberLength) const;
 
+    /** @param[out] s The state of the system.
+        @param tendonForce The tendon force (N). */
+    void setTendonForce(SimTK::State& s, double tendonForce) const;
+
 //==============================================================================
 // MUSCLE.H INTERFACE
 //==============================================================================
@@ -558,6 +564,8 @@ private:
     static const std::string STATE_ACTIVATION_NAME;
     // The name used to access the fiber length state.
     static const std::string STATE_FIBER_LENGTH_NAME;
+    // The name used to access the tendon force state.
+    static const std::string STATE_TENDON_FORCE_NAME;
 
     // Indicates whether fiber damping is included in the model (false if
     // dampingCoefficient < 0.001).
@@ -709,6 +717,8 @@ private:
 //==============================================================================
 // PRIVATE UTILITY CLASS MEMBERS
 //==============================================================================
+
+    double computeInitTendonForceFromProperties() const;
 
     // Subcomponents owned by the muscle. The properties of these subcomponents
     // are set in extendFinalizeFromProperties() from the properties of the
