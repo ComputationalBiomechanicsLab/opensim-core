@@ -37,6 +37,9 @@ const string Millard2012EquilibriumMuscle::
     STATE_FIBER_VELOCITY_NAME = "fiber_velocity";
 const double MIN_NONZERO_DAMPING_COEFFICIENT = 0.001;
 
+static const double FACCS = 1e0;
+static const double ERRK = 0.707;
+
 // TODO choose tolerance, initial guess, normalize or not, max iter.
 // Do you get stuck if tendon force goes to zero?
 static double calcTendonLengthFromTendonForce(
@@ -102,7 +105,7 @@ void Millard2012EquilibriumMuscle::constructProperties()
     constructProperty_fiber_damping(0.1); //damped model used by default
     constructProperty_default_activation(0.05);
     constructProperty_default_fiber_length(getOptimalFiberLength());
-    constructProperty_use_tendon_force_state(true); // TODO set to false
+    constructProperty_use_tendon_force_state(false); // TODO set to false
     constructProperty_use_fiber_velocity_state(true); // TODO set to false
 
     constructProperty_activation_time_constant(0.010);
@@ -481,7 +484,13 @@ getFiberStiffnessAlongTendon(const SimTK::State& s) const
 
 double Millard2012EquilibriumMuscle::
 getFiberVelocity(const SimTK::State& s) const
-{   return getFiberVelocityInfo(s).fiberVelocity; }
+{
+    if (get_use_fiber_velocity_state()) {
+        return getStateVariableValue(s, STATE_FIBER_VELOCITY_NAME) * FACCS;
+    } else {
+        return getFiberVelocityInfo(s).fiberVelocity;
+    }
+}
 
 double Millard2012EquilibriumMuscle::
 getActivationDerivative(const SimTK::State& s) const
@@ -610,7 +619,7 @@ setFiberVelocity(SimTK::State& s, double fiberVelocity) const
         "setFiberVelocity",
         "Attempted to set fiber velocity state while it is not used as a state.");
     if (!get_ignore_tendon_compliance()) {
-        setStateVariableValue(s, STATE_FIBER_VELOCITY_NAME, fiberVelocity);
+        setStateVariableValue(s, STATE_FIBER_VELOCITY_NAME, fiberVelocity / FACCS);
         markCacheVariableInvalid(s, _lengthInfoCV);
         markCacheVariableInvalid(s, _velInfoCV);
         markCacheVariableInvalid(s, _dynamicsInfoCV);
@@ -950,7 +959,7 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
 
             SimTK::Vec3 fiberVelocityV;
             if (get_use_fiber_velocity_state()) {
-                fiberVelocityV[0] = getStateVariableValue(s, STATE_FIBER_VELOCITY_NAME);
+                fiberVelocityV[0] = getFiberVelocity(s) / getMaxContractionVelocity() / getOptimalFiberLength();
                 fiberVelocityV[2] = 1.;
             } else {
                 fiberVelocityV = calcDampedNormFiberVelocity(
@@ -1239,13 +1248,13 @@ extendSetPropertiesFromState(const SimTK::State& s)
     if(!get_ignore_tendon_compliance()) {
         setDefaultFiberLength(
             get_use_tendon_force_state()?
-                getStateVariableValue(s,STATE_FIBER_LENGTH_NAME):
                 calcFiberLengthFromTendonStateInfo(
                     get_TendonForceLengthCurve(),
                     getStateVariableValue(s, STATE_TENDON_FORCE_NAME) / getMaxIsometricForce(),
                     getTendonSlackLength(),
                     getLength(s),
-                    getPennationModel().getParallelogramHeight()));
+                    getPennationModel().getParallelogramHeight()):
+                getStateVariableValue(s,STATE_FIBER_LENGTH_NAME));
     }
 }
 
@@ -1270,18 +1279,20 @@ void Millard2012EquilibriumMuscle::
     // if not disabled or overridden then compute its derivative
     bool notDisabledNorOverWritten = appliesForce(s) && !isActuationOverridden(s);
 
+    double ldot = notDisabledNorOverWritten? getFiberVelocity(s): 0.;
+    double vdot = notDisabledNorOverWritten? computeFiberAcceleration(s) / FACCS: 0.;
+
+    if (get_use_fiber_velocity_state()) { // Fiber velocity is part of the state.
+        setStateVariableDerivativeValue(s, STATE_FIBER_VELOCITY_NAME, vdot);
+    }
+
     if (!get_use_tendon_force_state()) { // Fiber length is part of the state.
-        double ldot = notDisabledNorOverWritten? getFiberVelocity(s): 0.;
         setStateVariableDerivativeValue(s, STATE_FIBER_LENGTH_NAME, ldot);
     } else {                            // Tendon force is part of the state.
         double fdot = notDisabledNorOverWritten?
             getMuscleDynamicsInfo(s).tendonStiffness *
                 getFiberVelocityInfo(s).tendonVelocity: 0.;
         setStateVariableDerivativeValue(s, STATE_TENDON_FORCE_NAME, fdot);
-    }
-    if (get_use_fiber_velocity_state()) { // Fiber velocity is part of the state.
-        double vdot = notDisabledNorOverWritten? computeFiberAcceleration(s): 0.;
-        setStateVariableDerivativeValue(s, STATE_FIBER_VELOCITY_NAME, vdot);
     }
 }
 
@@ -1352,18 +1363,35 @@ double Millard2012EquilibriumMuscle::
         mli.fiberActiveForceLengthMultiplier,
         getFiberDamping(),
         mvi.normFiberVelocity);
+                // fiberVelocityV[0] = getFiberVelocity(s) * getMaxContractionVelocity() * getOptimalFiberLength();
 
     const double jacFiberForceToFiberVelocity =
-        jacFiberForceToNormFiberVelocity / vmax;
+        jacFiberForceToNormFiberVelocity / vmax / getOptimalFiberLength();
     const double jacMuscleForceToFiberVelocity =
         jacFiberForceToFiberVelocity * mli.cosPennationAngle;
+
+    const double jacMuscleForceToFiberLength = calc_DFiberForceAT_DFiberLength(
+        mdi.fiberForce,
+        mdi.fiberStiffness,
+        mli.fiberLength,
+        mli.sinPennationAngle,
+        mli.cosPennationAngle);
 
     const double err = mdi.fiberForceAlongTendon - mdi.tendonForce;;
 
     double tendonForceDot = mdi.tendonStiffness * mvi.tendonVelocity;
 
-    return (tendonForceDot - mdi.muscleStiffness * mvi.fiberVelocity
-        ) / jacMuscleForceToFiberVelocity - err * 1e1;
+    double gain = jacMuscleForceToFiberLength / jacMuscleForceToFiberVelocity;
+    gain = gain / jacMuscleForceToFiberVelocity;
+    double gain2 = computeEigenValue(s) / jacMuscleForceToFiberVelocity;
+    gain = std::abs(gain);
+    gain2 = std::abs(gain2);
+
+    std::cout << "gain = " << gain << ", ";
+    std::cout << "gain2 = " << gain2 << std::endl;
+
+    return (tendonForceDot - jacMuscleForceToFiberLength * mvi.fiberVelocity)
+        / jacMuscleForceToFiberVelocity - err * gain2 * ERRK;
 }
 
 //==============================================================================
