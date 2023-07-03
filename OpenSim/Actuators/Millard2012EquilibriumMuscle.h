@@ -228,6 +228,8 @@ public:
         "Tendon-force-length curve.");
     OpenSim_DECLARE_PROPERTY(use_tendon_force_state, bool,
         "Use tendon force as state.");
+    OpenSim_DECLARE_PROPERTY(use_fiber_velocity_state, bool,
+        "Use tendon force as state.");
 
 //==============================================================================
 // OUTPUTS
@@ -416,6 +418,10 @@ public:
     void setFiberLength(SimTK::State& s, double fiberLength) const;
 
     /** @param[out] s The state of the system.
+        @param fiberLength The desired fiber velocity (m/s). */
+    void setFiberVelocity(SimTK::State& s, double fiberVelocity) const;
+
+    /** @param[out] s The state of the system.
         @param tendonForce The tendon force (N). */
     void setTendonForce(SimTK::State& s, double tendonForce) const;
 
@@ -447,6 +453,10 @@ public:
     */
     void computeFiberEquilibrium(SimTK::State& s, 
                                  bool solveForVelocity = false) const;
+
+    double computeFiberAcceleration(const SimTK::State& s) const;
+
+    double computeEigenValue(const SimTK::State& s) const;
 
 //==============================================================================
 // DEPRECATED
@@ -564,6 +574,8 @@ private:
     static const std::string STATE_ACTIVATION_NAME;
     // The name used to access the fiber length state.
     static const std::string STATE_FIBER_LENGTH_NAME;
+    // The name used to access the fiber velocity state.
+    static const std::string STATE_FIBER_VELOCITY_NAME;
     // The name used to access the tendon force state.
     static const std::string STATE_TENDON_FORCE_NAME;
 
