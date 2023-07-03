@@ -1236,13 +1236,13 @@ extendSetPropertiesFromState(const SimTK::State& s)
     if(!get_ignore_tendon_compliance()) {
         setDefaultFiberLength(
             get_use_tendon_force_state()?
-                getStateVariableValue(s,STATE_FIBER_LENGTH_NAME):
                 calcFiberLengthFromTendonStateInfo(
                     get_TendonForceLengthCurve(),
                     getNormalizedTendonForce(s),
                     getTendonSlackLength(),
                     getLength(s),
-                    getPennationModel().getParallelogramHeight()));
+                    getPennationModel().getParallelogramHeight()):
+                getStateVariableValue(s,STATE_FIBER_LENGTH_NAME));
     }
 }
 
