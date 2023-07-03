@@ -42,16 +42,19 @@ static double calcTendonLengthFromTendonForce(
     double normalizedTendonForce,
     double tendonSlackLength)
 {
-    if (std::abs(normalizedTendonForce) < 1e-13) {
+    if (normalizedTendonForce <= 0.) {
         return tendonSlackLength;
     }
 
-    double tolerance = 1e-4;
+    const double tolerance = 1e-4;
+    const size_t maxIter = 10;
+
+    double error = SimTK::Infinity;
+    // Initial guess for normalized tendong length (must be > 1.).
     double normalizedTendonLength = 1.10;
-    double error = 2. * tolerance;
 
     for (size_t i = 0;
-        i < 100 &&
+        i < maxIter &&
         std::abs(error) > tolerance &&
         normalizedTendonLength > 1.;
         ++i)
@@ -59,7 +62,7 @@ static double calcTendonLengthFromTendonForce(
         error = normalizedTendonForce - fseCurve.calcValue(normalizedTendonLength);
 
         double step = error / fseCurve.calcDerivative(normalizedTendonLength, 1);
-        double minNextLength = 1. + ( normalizedTendonLength - 1. ) / 4.;
+        double minNextLength = 1. + ( normalizedTendonLength - 1. ) / 10.;
 
         normalizedTendonLength += step;
         normalizedTendonLength = std::max(normalizedTendonLength, minNextLength);
@@ -70,7 +73,7 @@ static double calcTendonLengthFromTendonForce(
         "calcTendonLengthFromTendonForce",
         "Failed to compute tendon length from tendon force.");
 
-    return std::max(normalizedTendonLength, 1.) * tendonSlackLength;
+    return std::max(1., normalizedTendonLength) * tendonSlackLength;
 }
 
 static double calcFiberLengthFromTendonStateInfo(
