@@ -336,6 +336,14 @@ public:
     double getFiberVelocity(const SimTK::State& s) const;
 
     /** @param s The state of the system.
+    @returns The tendon force (N). */
+    double getTendonForce(const SimTK::State& s) const;
+
+    /** @param s The state of the system.
+    @returns The normalized tendon force (N). */
+    double getNormalizedTendonForce(const SimTK::State& s) const;
+
+    /** @param s The state of the system.
     @returns The time derivative of activation. */
     double getActivationDerivative(const SimTK::State& s) const;
 
@@ -414,6 +422,10 @@ public:
     /** @param[out] s The state of the system.
         @param fiberLength The desired fiber length (m). */
     void setFiberLength(SimTK::State& s, double fiberLength) const;
+
+    /** @param[out] s The state of the system.
+        @param normalizedTendonForce The normalized tendon force (N). */
+    void setNormalizedTendonForce(SimTK::State& s, double normalizedTendonForce) const;
 
     /** @param[out] s The state of the system.
         @param tendonForce The tendon force (N). */
@@ -564,8 +576,8 @@ private:
     static const std::string STATE_ACTIVATION_NAME;
     // The name used to access the fiber length state.
     static const std::string STATE_FIBER_LENGTH_NAME;
-    // The name used to access the tendon force state.
-    static const std::string STATE_TENDON_FORCE_NAME;
+    // The name used to access the normalized tendon force state.
+    static const std::string STATE_NORMALIZED_TENDON_FORCE_NAME;
 
     // Indicates whether fiber damping is included in the model (false if
     // dampingCoefficient < 0.001).
@@ -718,7 +730,7 @@ private:
 // PRIVATE UTILITY CLASS MEMBERS
 //==============================================================================
 
-    double computeInitTendonForceFromProperties() const;
+    double computeInitNormalizedTendonForceFromProperties() const;
 
     // Subcomponents owned by the muscle. The properties of these subcomponents
     // are set in extendFinalizeFromProperties() from the properties of the

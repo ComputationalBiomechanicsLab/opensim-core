@@ -32,7 +32,7 @@ const string Millard2012EquilibriumMuscle::
 const string Millard2012EquilibriumMuscle::
     STATE_FIBER_LENGTH_NAME = "fiber_length";
 const string Millard2012EquilibriumMuscle::
-    STATE_TENDON_FORCE_NAME = "tendon_force";
+    STATE_NORMALIZED_TENDON_FORCE_NAME = "normalized_tendon_force";
 const double MIN_NONZERO_DAMPING_COEFFICIENT = 0.001;
 
 // TODO choose tolerance, initial guess, normalize or not, max iter.
@@ -118,10 +118,9 @@ void Millard2012EquilibriumMuscle::constructProperties()
 
 // TODO: How best to compute init tendon for from default props
 double Millard2012EquilibriumMuscle::
-    computeInitTendonForceFromProperties() const
+    computeInitNormalizedTendonForceFromProperties() const
 {
     const double ofl = getOptimalFiberLength();
-    const double fiso = getMaxIsometricForce();
     const double a = getDefaultActivation();
     const double lce = getDefaultFiberLength();
     const double lceN = lce / ofl;
@@ -130,7 +129,7 @@ double Millard2012EquilibriumMuscle::
     const ActiveForceLengthCurve& falCurve = get_ActiveForceLengthCurve();
     const FiberForceLengthCurve&  fpeCurve = get_FiberForceLengthCurve();
 
-    return fiso * (a * falCurve.calcValue(lce) + fpeCurve.calcValue(lceN)) * std::cos(phi);
+    return (a * falCurve.calcValue(lce) + fpeCurve.calcValue(lceN)) * std::cos(phi);
 }
 
 void Millard2012EquilibriumMuscle::extendFinalizeFromProperties()
@@ -481,6 +480,23 @@ getFiberVelocity(const SimTK::State& s) const
 {   return getFiberVelocityInfo(s).fiberVelocity; }
 
 double Millard2012EquilibriumMuscle::
+getNormalizedTendonForce(const SimTK::State& s) const
+{
+    return get_use_tendon_force_state()?
+        std::max(getStateVariableValue(s, STATE_NORMALIZED_TENDON_FORCE_NAME), 1e-10):
+        getMuscleDynamicsInfo(s).normTendonForce;
+}
+
+double Millard2012EquilibriumMuscle::
+getTendonForce(const SimTK::State& s) const
+{
+    return get_use_tendon_force_state()?
+        std::max(getStateVariableValue(s, STATE_NORMALIZED_TENDON_FORCE_NAME), 1e-10) *
+            get_max_isometric_force():
+        getMuscleDynamicsInfo(s).tendonForce;
+}
+
+double Millard2012EquilibriumMuscle::
 getActivationDerivative(const SimTK::State& s) const
 {
     if (get_ignore_activation_dynamics())
@@ -601,11 +617,17 @@ setFiberLength(SimTK::State& s, double fiberLength) const
 void Millard2012EquilibriumMuscle::
 setTendonForce(SimTK::State& s, double tendonForce) const
 {
+    setNormalizedTendonForce(s, tendonForce / get_max_isometric_force());
+}
+
+void Millard2012EquilibriumMuscle::
+setNormalizedTendonForce(SimTK::State& s, double normalizedTendonForce) const
+{
     SimTK_ERRCHK_ALWAYS(get_use_tendon_force_state(),
-        "setTendonForce",
-        "Attempted to set tendon force state while fiber length is used as state.");
+        "setNormalizedTendonForce",
+        "Attempted to set normalized tendon force state while fiber length is used as state.");
     if (!get_ignore_tendon_compliance()) {
-        setStateVariableValue(s, STATE_TENDON_FORCE_NAME, tendonForce);
+        setStateVariableValue(s, STATE_NORMALIZED_TENDON_FORCE_NAME, std::max(normalizedTendonForce, 0.));
         markCacheVariableInvalid(s, _lengthInfoCV);
         markCacheVariableInvalid(s, _velInfoCV);
         markCacheVariableInvalid(s, _dynamicsInfoCV);
@@ -618,9 +640,7 @@ setTendonForce(SimTK::State& s, double tendonForce) const
 double Millard2012EquilibriumMuscle::
 computeActuation(const SimTK::State& s) const
 {
-    const double tendonForce = get_use_tendon_force_state()?
-        getStateVariableValue(s, STATE_TENDON_FORCE_NAME) :
-        getMuscleDynamicsInfo(s).tendonForce;
+    const double tendonForce = getMuscleDynamicsInfo(s).tendonForce;
     setActuation(s, tendonForce);
     return tendonForce;
 }
@@ -731,10 +751,9 @@ void Millard2012EquilibriumMuscle::calcMuscleLengthInfo(const SimTK::State& s,
         } else if (!get_use_tendon_force_state()) {                                            // elastic tendon
             mli.fiberLength = getStateVariableValue(s, STATE_FIBER_LENGTH_NAME);
         } else {
-            double tendonForce = getStateVariableValue(s, STATE_TENDON_FORCE_NAME);
             mli.fiberLength = calcFiberLengthFromTendonStateInfo(
                 get_TendonForceLengthCurve(),
-                tendonForce / getMaxIsometricForce(),
+                getNormalizedTendonForce(s),
                 getTendonSlackLength(),
                 muscleTendonLength,
                 getPennationModel().getParallelogramHeight());
@@ -1173,7 +1192,7 @@ extendAddToSystem(SimTK::MultibodySystem& system) const
     if(!get_use_tendon_force_state()) {
         addStateVariable(STATE_FIBER_LENGTH_NAME);
     } else {
-        addStateVariable(STATE_TENDON_FORCE_NAME);
+        addStateVariable(STATE_NORMALIZED_TENDON_FORCE_NAME);
     }
 }
 
@@ -1192,7 +1211,7 @@ extendInitStateFromProperties(SimTK::State& s) const
     if (!get_use_tendon_force_state()) {
         setFiberLength(s, getDefaultFiberLength());
     } else {
-        setTendonForce(s, computeInitTendonForceFromProperties());
+        setNormalizedTendonForce(s, computeInitNormalizedTendonForceFromProperties());
     }
 }
 
@@ -1210,7 +1229,7 @@ extendSetPropertiesFromState(const SimTK::State& s)
                 getStateVariableValue(s,STATE_FIBER_LENGTH_NAME):
                 calcFiberLengthFromTendonStateInfo(
                     get_TendonForceLengthCurve(),
-                    getStateVariableValue(s, STATE_TENDON_FORCE_NAME) / getMaxIsometricForce(),
+                    getNormalizedTendonForce(s),
                     getTendonSlackLength(),
                     getLength(s),
                     getPennationModel().getParallelogramHeight()));
@@ -1242,10 +1261,11 @@ void Millard2012EquilibriumMuscle::
         double ldot = notDisabledNorOverWritten? getFiberVelocity(s): 0.;
         setStateVariableDerivativeValue(s, STATE_FIBER_LENGTH_NAME, ldot);
     } else {                            // Tendon force is part of the state.
+        double fiso = getMaxIsometricForce();
         double fdot = notDisabledNorOverWritten?
             getMuscleDynamicsInfo(s).tendonStiffness *
-                getFiberVelocityInfo(s).tendonVelocity: 0.;
-        setStateVariableDerivativeValue(s, STATE_TENDON_FORCE_NAME, fdot);
+                getFiberVelocityInfo(s).tendonVelocity / fiso: 0.;
+        setStateVariableDerivativeValue(s, STATE_NORMALIZED_TENDON_FORCE_NAME, fdot);
     }
 }
 
