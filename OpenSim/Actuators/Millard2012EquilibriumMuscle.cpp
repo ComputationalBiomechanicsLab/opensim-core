@@ -79,14 +79,14 @@ static double calcTendonLengthFromTendonForce(
 static double calcFiberLengthFromTendonStateInfo(
     const TendonForceLengthCurve& fseCurve,
     double NormalizedTendonForce,
-    double tendonLengthInit,
+    double tendonSlackLength,
     double muscleTendonLength,
     double pennationModelHeight)
 {
     double tendonLength = calcTendonLengthFromTendonForce(
         fseCurve,
         NormalizedTendonForce,
-        tendonLengthInit);
+        tendonSlackLength);
 
     return std::sqrt(std::pow(pennationModelHeight, 2)
         + std::pow(muscleTendonLength - tendonLength, 2));
