@@ -1120,6 +1120,13 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
         } else {
             fse = fmAT/fiso;
         }
+        if(get_ignore_tendon_compliance()) {
+            fse = fmAT/fiso;
+        } else if (get_use_tendon_force_state()) {
+            fse = getNormalizedTendonForce(s);
+        } else {
+            fse = fseCurve.calcValue(mli.normTendonLength);
+        }
 
         mdi.activation                = a;
         mdi.fiberForce                = fm;
