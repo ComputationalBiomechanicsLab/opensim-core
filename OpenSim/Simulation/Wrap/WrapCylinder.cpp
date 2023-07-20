@@ -378,11 +378,11 @@ namespace {
     //
     // Checks 4 conditions:
     // - 1. If either point lies inside the circle.
-    // - 2. If unconstrained, and straight line from start to end does not
-    //      intersect the circle.
-    // - 3. If both points lie in the active quadrant.
-    // - 4. If one point lies in the non-active quadrant, and closest point in
-    //      non-active quadrant.
+    // - 2. If straight line from start to end does not intersect circle AND either:
+    //    - a. Quadrant is unconstrained,
+    //    - b. Both points lie in the active quadrant.
+    //    - c. One point lies in the non-active quadrant, and closest point in
+    //         lies in the active quadrant.
     bool DoNotAttemptWrapping(
         const PathSegmentVec2& path,
         double radius,
@@ -394,32 +394,37 @@ namespace {
             IsPointInsideCircle(path.start, radiusSquared) ||
             IsPointInsideCircle(path.end, radiusSquared);
 
-        // Condition 2: Do not wrap if unconstrained and the straight line connecting
-        // start-end does not intersect the circle.
+        // Condition 2: Do not wrap if straight line connecting start-end does
+        // not intersect the circle.
         const SimTK::Vec2 closestPointOnLine = ClosestPointOnLineAB(
             path.start,
             path.end);
-        if (quadrant.sign == WrapSign::Unconstrained) {
-            const double normClosestPointOnLineSquared = SimTK::dot(
-                closestPointOnLine,
-                closestPointOnLine);
-            doNotAttemptWrapping |= normClosestPointOnLineSquared > radiusSquared;
-            return doNotAttemptWrapping;
+        const double normClosestPointOnLineSquared = SimTK::dot(
+            closestPointOnLine,
+            closestPointOnLine);
+        if (normClosestPointOnLineSquared <= radiusSquared) {
+            // Straight line does intersect the circle.
+            return false;
         }
 
-        // Condition 3: Do not wrap if both points lie in the active quadrant.
+        // Straight line did not intersect the circle, check conditions 2-a,b,c:
+
+        // Condition 2.a: Unconstrained quadrant?
+        doNotAttemptWrapping |= quadrant.sign == WrapSign::Unconstrained;
+
+        // Condition 2.b: Do not wrap if both points lie in the active quadrant.
         const bool startInActiveQuadrant =
             IsPointInActiveQuadrant(path.start, quadrant);
         const bool endInActiveQuadrant =
             IsPointInActiveQuadrant(path.end, quadrant);
         doNotAttemptWrapping |= startInActiveQuadrant && endInActiveQuadrant;
 
-        // Condition 4: Do not wrap if only one point in non-active, and nearest
-        // in active quadrant.
+        // Condition 2.c: Do not wrap if only one point in non-active, and
+        // nearest in active quadrant.
         const bool closestPointInActiveQuadrant = IsPointInActiveQuadrant(
             closestPointOnLine,
             quadrant);
-        doNotAttemptWrapping |= startInActiveQuadrant != endInActiveQuadrant
+        doNotAttemptWrapping |= (startInActiveQuadrant != endInActiveQuadrant)
             && closestPointInActiveQuadrant;
 
         return doNotAttemptWrapping;
