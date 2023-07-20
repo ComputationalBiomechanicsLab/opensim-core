@@ -216,6 +216,15 @@ namespace {
     // Representation of a line obtained by connecting a point
     // to a circle, such that the line is tangent to the circle.
     struct TangentLine final {
+        TangentLine() = default;
+
+        TangentLine(
+            Angle angleOfTangentPointOnCircle,
+            double tangentLineLength) :
+            angleOfTangentPoint(angleOfTangentPointOnCircle),
+            length(tangentLineLength)
+        {}
+
         operator Angle() const
         {
             return angleOfTangentPoint;
