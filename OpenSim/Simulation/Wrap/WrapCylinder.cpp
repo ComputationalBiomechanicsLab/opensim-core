@@ -257,7 +257,7 @@ namespace {
                 circleRadius)),
             // That same triangle gives the angle between the external point,
             // and the tangent point on the circle:
-            _anglePointToTangentPoint(SimTK::Vec2(_length, circleRadius)),
+            _anglePointToTangentPoint(SimTK::Vec2(circleRadius, _length)),
             _anglePoint(point.angle)
         {}
 
