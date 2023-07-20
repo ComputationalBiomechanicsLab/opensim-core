@@ -146,6 +146,12 @@ namespace {
         Negative,
     };
 
+    RotationDirection operator!(RotationDirection direction)
+    {
+        return direction == RotationDirection::Positive?
+            RotationDirection::Negative : RotationDirection::Positive;
+    }
+
     // Angular distance from start- to end angle, given a direction of rotation.
     double AngularDistance(
         Angle startAngle,
