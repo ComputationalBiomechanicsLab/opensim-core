@@ -191,9 +191,7 @@ namespace {
 
         // Return closest of A and B.
         if (closestPointIsEitherAOrB) {
-            const double normASquared = SimTK::dot(pointA, pointA);
-            const double normBSquared = SimTK::dot(pointB, pointB);
-            return normASquared < normBSquared? pointA : pointB;
+            return std::abs(vTa) < std::abs(vTb)? pointA : pointB;
         }
 
         // Compute closest point on infinite line through A and B.
