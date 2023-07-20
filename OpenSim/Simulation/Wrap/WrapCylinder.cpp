@@ -64,10 +64,10 @@ namespace {
         template<typename X, typename ...Args>
         PathSegment(
             const PathSegment<X>& other,
-            const Args& ...args) :
+            Args&& ...args) :
             PathSegment{
-                T(other.start, args...),
-                T(other.end, args...)
+                T(other.start, std::forward<Args>(args)...),
+                T(other.end, std::forward<Args>(args)...)
             }
         {}
 
@@ -493,11 +493,11 @@ namespace {
         template<typename X, typename ...Args>
         PositiveAndNegativeRotatingPair(
             const PositiveAndNegativeRotatingPair<X>& other,
-            const Args& ...args) :
+            Args&& ...args) :
             PositiveAndNegativeRotatingPair
             {
-                T(RotationDirection::Positive, other.positive, args...),
-                T(RotationDirection::Negative, other.negative, args...)
+                T(RotationDirection::Positive, other.positive, std::forward<Args>(args)...),
+                T(RotationDirection::Negative, other.negative, std::forward<Args>(args)...)
             }
         {}
 
