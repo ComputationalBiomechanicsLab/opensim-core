@@ -430,24 +430,30 @@ namespace {
     // Given the wrapping path on a circle, determine if it is valid based on
     // the quadrant.
     //
-    // Wrapped path is valid if:
+    // Wrapped path is not valid if:
     // 1. Both angles in non-active quadrant.
-    // 2. Both angles in active-quadrant, while not wrapping the entire
-    //    non-active quadrant.
+    // 2. Both angles in active-quadrant, while wrapping the entire non-active
+    //    quadrant.
     bool IsValidQuadrantWrapped(
         const PathSegment<Angle>& path,
         double angularDistance,
         const Quadrant& quadrant)
     {
+        if (quadrant.sign == WrapSign::Unconstrained) {
+            return true;
+        }
+
         const bool startOk = IsAngleInQuadrant(path.start, quadrant);
         const bool endOk = IsAngleInQuadrant(path.end, quadrant);
 
-        // Condition 1: Both angles in non-active.
-        bool validWrap = !startOk && !endOk;
+        // Condition 1: Invalid if both angles in non-active.
+        bool notValidWrap = !startOk && !endOk;
 
-        // Condition 2: Both in active, and wrapping entire non-active.
-        validWrap |= startOk && endOk && std::abs(angularDistance) < SimTK::Pi;
-        return validWrap;
+        // Condition 2: Invalid if both in active, and wrapping entire
+        // non-active quadrant.
+        notValidWrap |=
+            startOk && endOk && std::abs(angularDistance) > SimTK::Pi;
+        return !notValidWrap;
     }
 
 }
