@@ -119,7 +119,7 @@ namespace {
         double angle = lhs.getValue() + rhs.getValue();
         // Map angle to [0...2pi] range. Using fmod would be more robust against
         // repeated calls, but significantly slower. For the current code this
-        // robustness would be overkill, so we go for speed:
+        // robustness would be overkill:
         angle = angle > c_TAU? angle - c_TAU : angle; // poor man's fmod()
         return Angle{angle};
     }
@@ -201,7 +201,6 @@ namespace {
         return pointA - vecAB * vTa / vTv;
     }
 
-    // Check if either start or end is inside the circle radius.
     bool IsPointInsideCircle(
         const SimTK::Vec2& point,
         double radiusSquared)
@@ -721,7 +720,8 @@ namespace {
 
         // Get the path point on the wrapped surface for anywhere between start
         // (t=0) and end (t=1).
-        SimTK::Vec3 computeWrappedPathPoint(double t) const {
+        SimTK::Vec3 computeWrappedPathPoint(double t) const
+        {
             const double angle = t * circleWrap.wrappedAngularDistance +
                 circleWrap.getWrappedPathStartAngle();
             const double axialCoord = t * Difference(axialWrap.wrappedPath) +
