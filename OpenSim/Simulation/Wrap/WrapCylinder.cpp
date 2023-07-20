@@ -236,49 +236,64 @@ namespace {
         double length = SimTK::NaN;
     };
 
+    // Given a long and short side of a right-angled triangle, returns the
+    // remaining short side length.
+    double PythagorasLengthFromLongAndShort(
+        double longTriangleSide,
+        double shortTriangleSide)
+    {
+        return std::sqrt(
+            longTriangleSide * longTriangleSide -
+            shortTriangleSide * shortTriangleSide);
+    }
+
     // Representation of the two possible TangentLines conntecting a point and
     // circle.
     struct BothTangentLines final {
         BothTangentLines(const PolarCoordinates& point, double circleRadius) :
-            _length(SimTK::Vec2{point.magnitude, circleRadius}.norm()),
-            _angleMid(point.angle),
-            _angleDiff(SimTK::Vec2(_length, circleRadius))
+            // By definition, the tangent point on the circle, the origin and
+            // the external point form a right angled triangle:
+            _length(PythagorasLengthFromLongAndShort(
+                point.magnitude,
+                circleRadius)),
+            // That same triangle gives the angle between the external point,
+            // and the tangent point on the circle:
+            _anglePointToTangentPoint(SimTK::Vec2(_length, circleRadius)),
+            _anglePoint(point.angle)
         {}
 
         BothTangentLines(const SimTK::Vec2& point, double circleRadius) :
             BothTangentLines(PolarCoordinates(point), circleRadius)
         {}
 
-        private:
-        TangentLine getTangentLineHelper(bool invertSign) const {
-            TangentLine tangentLine;
-            tangentLine.angleOfTangentPoint = invertSign?
-                _angleMid - _angleDiff : _angleMid + _angleDiff,
-            tangentLine.length = _length;
-            return tangentLine;
-        }
-
-        public:
+        // Returns the TangentLine obtained when starting from the external
+        // point and traversing in the given direction to the tangent point.
         TangentLine
             getTangentLineStartingAtPoint(RotationDirection direction) const
         {
-            return getTangentLineHelper(
-                direction == RotationDirection::Positive);
+            Angle angleOfTangentPoint =
+                direction == RotationDirection::Positive?
+                _anglePoint + _anglePointToTangentPoint :
+                _anglePoint - _anglePointToTangentPoint;
+            return TangentLine{angleOfTangentPoint, _length};
         }
 
+        // Reversed of getTangentLineStartingAtPoint: Returns the TangentLine
+        // obtained when starting from the circle and traversing in the given
+        // direction to the external point.
         TangentLine
             getTangentLineEndingAtPoint(RotationDirection direction) const
         {
-            return getTangentLineHelper(
-                direction == RotationDirection::Negative);
+            return getTangentLineStartingAtPoint(!direction);
         }
 
         private:
+
         // Line segment length, given either direction.
         double _length = SimTK::NaN;
         // Helpers for constructing the angle of the tangent point.
-        Angle _angleMid;
-        Angle _angleDiff;
+        Angle _anglePointToTangentPoint;
+        Angle _anglePoint;
     };
 }
 
@@ -298,7 +313,6 @@ namespace {
     };
 
     struct Quadrant {
-
         Quadrant(int wrapSign, int wrapAxis)
         {
             switch (wrapAxis) {
