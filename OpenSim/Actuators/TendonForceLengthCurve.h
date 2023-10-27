@@ -263,7 +263,7 @@ public:
     'aNormLength'. */
     double calcValue(double aNormLength) const;
 
-    double calcValueAndDerivative(
+    void calcValueAndDerivative(
             double aNormLength,
             double& value,
             double& derivative) const;

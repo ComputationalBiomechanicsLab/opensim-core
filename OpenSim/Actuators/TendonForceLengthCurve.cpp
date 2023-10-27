@@ -224,7 +224,7 @@ double TendonForceLengthCurve::calcValue(double aNormLength) const
 }
 
 
-double TendonForceLengthCurve::calcValueAndDerivative(
+void TendonForceLengthCurve::calcValueAndDerivative(
         double aNormLength,
         double& value,
         double& derivative) const
@@ -233,7 +233,7 @@ double TendonForceLengthCurve::calcValueAndDerivative(
             isObjectUpToDateWithProperties(),
             "TendonForceLengthCurve: Tendon is not up-to-date with its "
             "properties");
-    return m_curve.calcValueAndDerivative(aNormLength, value, derivative);
+   m_curve.calcValueAndDerivative(aNormLength, value, derivative);
 }
 
 double TendonForceLengthCurve::calcDerivative(double aNormLength,

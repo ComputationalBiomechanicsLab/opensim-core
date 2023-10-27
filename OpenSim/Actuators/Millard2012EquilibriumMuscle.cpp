@@ -1065,10 +1065,7 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
             }
         }
 
-        double fse = 0.0;
-        if(!get_ignore_tendon_compliance()) {
-            fse = fseCurve.calcValue(mli.normTendonLength);
-        } else {
+        if(get_ignore_tendon_compliance()) {
             fse = fmAT/fiso;
         }
 
