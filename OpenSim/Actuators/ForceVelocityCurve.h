@@ -316,7 +316,11 @@ public:
         normalized fiber velocity.
     */
     double calcDerivative(double normFiberVelocity, int order) const;
-    
+
+    void calcValueAndDerivative(
+            double normFiberVelocity,
+            double& value,
+            double& derivative) const;
 
     /// If possible, use the simpler overload above.
     double calcDerivative(const std::vector<int>& derivComponents,

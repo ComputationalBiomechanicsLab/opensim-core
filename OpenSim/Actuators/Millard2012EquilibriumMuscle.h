@@ -569,6 +569,14 @@ private:
     // Rebuilds muscle model if any of its properties have changed.
     void extendFinalizeFromProperties() override;
 
+    struct CalcDampedNormFiberVelocityResult {
+        double normFiberVelocity;
+        double forceVelocityCurveValue;
+        double errorValue;
+        // Check this flag before reading the other fields.
+        bool isValid;
+    };
+
     /* Calculates the fiber velocity that satisfies the equilibrium equation
     given a fixed fiber length.
         @param fiso maximum isometric force
@@ -581,7 +589,8 @@ private:
         @returns [0] dlceN_dt
                  [1] err
                  [2] converged */
-    SimTK::Vec3 calcDampedNormFiberVelocity(double fiso,
+    CalcDampedNormFiberVelocityResult
+     calcDampedNormFiberVelocity(double fiso,
                                             double a,
                                             double fal,
                                             double fpe,

@@ -265,9 +265,15 @@ public:
     0 <= curviness <= 1
     \endverbatim
     */
-    void setOptionalProperties(double stiffnessAtLowForce,
-                               double stiffnessAtOneNormForce,
-                               double curviness);
+    void setOptionalProperties(
+            double stiffnessAtLowForce,
+            double stiffnessAtOneNormForce,
+            double curviness);
+
+    void calcValueAndDerivative(
+            double normFiberLength,
+            double& value,
+            double& derivative) const;
 
     /** Implement the generic OpenSim::Function interface **/
     double calcValue(const SimTK::Vector& x) const override

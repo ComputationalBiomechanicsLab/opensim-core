@@ -212,6 +212,17 @@ void FiberForceLengthCurve::setOptionalProperties(double aStiffnessAtLowForce,
 //==============================================================================
 // SERVICES
 //==============================================================================
+
+void FiberForceLengthCurve::calcValueAndDerivative(
+        double normFiberLength,
+        double& value,
+        double& derivative) const
+{
+    SimTK_ASSERT(isObjectUpToDateWithProperties(),
+        "FiberForceLengthCurve: Curve is not up-to-date with its properties");
+    m_curve.calcValueAndDerivative(normFiberLength, value, derivative);
+}
+
 double FiberForceLengthCurve::calcValue(double normFiberLength) const
 {
     SimTK_ASSERT(isObjectUpToDateWithProperties(),

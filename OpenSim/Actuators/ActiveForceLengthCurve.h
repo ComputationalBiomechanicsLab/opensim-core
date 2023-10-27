@@ -209,6 +209,10 @@ public:
     'normFiberLength'. */
     double calcValue(double normFiberLength) const;
 
+    void calcValueAndDerivative(
+            double normFiberVelocity,
+            double& value,
+            double& derivative) const;
 
     /** Calculates the derivative of the active-force-length multiplier with
     respect to the normalized fiber length.

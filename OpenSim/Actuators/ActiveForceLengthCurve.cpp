@@ -151,6 +151,17 @@ void ActiveForceLengthCurve::setMinValue(double minimumValue)
 //==============================================================================
 // SERVICES
 //==============================================================================
+
+void ActiveForceLengthCurve::calcValueAndDerivative(
+        double normFiberLength,
+        double& value,
+        double& derivative) const
+{
+    SimTK_ASSERT(isObjectUpToDateWithProperties(),
+        "ActiveForceLengthCurve: Curve is not up-to-date with its properties");
+    m_curve.calcValueAndDerivative(normFiberLength, value, derivative);
+}
+
 double ActiveForceLengthCurve::calcValue(double normFiberLength) const
 {
     SimTK_ASSERT(isObjectUpToDateWithProperties(),
