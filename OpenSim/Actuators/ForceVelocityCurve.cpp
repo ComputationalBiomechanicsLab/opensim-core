@@ -187,9 +187,6 @@ void ForceVelocityCurve::calcValueAndDerivative(
     m_curve.calcValueAndDerivative(normFiberVelocity, value, derivative);
 }
 
-    return m_curve.calcDerivative(normFiberVelocity,order);
-}
-
 double ForceVelocityCurve::
     calcDerivative(const std::vector<int>& derivComponents,
                    const SimTK::Vector& x) const
