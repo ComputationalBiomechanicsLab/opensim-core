@@ -539,6 +539,50 @@ ________________________________________________________________________
 
 */
 
+void SmoothSegmentedFunction::calcValueAndDerivative(
+        double x,
+        double& y,
+        double& yDot) const
+{
+    const SimTK::Array_<SimTK::Spline>& arraySplineUX =
+            _smoothData->_arraySplineUX;
+    const SimTK::Array_<SimTK::Vec6>& ctrlPtsX = _smoothData->_ctrlPtsX;
+    const SimTK::Array_<SimTK::Vec6>& ctrlPtsY = _smoothData->_ctrlPtsY;
+    double x0                                  = _smoothData->_x0;
+    double x1                                  = _smoothData->_x1;
+    double y0                                  = _smoothData->_y0;
+    double y1                                  = _smoothData->_y1;
+    double dydx0                               = _smoothData->_dydx0;
+    double dydx1                               = _smoothData->_dydx1;
+
+    if (x >= x0 && x <= x1) {
+        int idx  = SegmentedQuinticBezierToolkit::calcIndex(x, ctrlPtsX);
+        double u = SegmentedQuinticBezierToolkit::calcU(
+                x,
+                ctrlPtsX[idx],
+                arraySplineUX[idx],
+                UTOL,
+                MAXITER);
+        y = SegmentedQuinticBezierToolkit::calcQuinticBezierCurveVal(
+                u,
+                ctrlPtsY[idx]);
+        yDot = SegmentedQuinticBezierToolkit::calcQuinticBezierCurveDerivDYDX(
+                u,
+                ctrlPtsX[idx],
+                ctrlPtsY[idx],
+                1);
+        return;
+    }
+
+    if (x < x0) {
+        y    = y0 + dydx0 * (x - x0);
+        yDot = dydx0;
+    } else {
+        y    = y1 + dydx1 * (x - x1);
+        yDot = dydx1;
+    }
+}
+
 double SmoothSegmentedFunction::calcValue(double x) const
 {
     const SimTK::Array_<SimTK::Spline>& arraySplineUX =

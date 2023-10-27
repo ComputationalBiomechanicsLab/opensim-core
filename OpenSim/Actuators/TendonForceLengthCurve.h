@@ -263,6 +263,11 @@ public:
     'aNormLength'. */
     double calcValue(double aNormLength) const;
 
+    double calcValueAndDerivative(
+            double aNormLength,
+            double& value,
+            double& derivative) const;
+
     /** Calculates the derivative of the tendon-force-length multiplier with
     respect to the normalized tendon length.
     @param aNormLength

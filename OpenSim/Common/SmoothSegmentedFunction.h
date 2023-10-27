@@ -109,6 +109,8 @@ namespace OpenSim {
        */
        double calcValue(double x) const;
 
+void calcValueAndDerivative(double x, double& y, double& yDot) const;
+
       
 
        /**Calculates the value of the derivative of the curve this object 
