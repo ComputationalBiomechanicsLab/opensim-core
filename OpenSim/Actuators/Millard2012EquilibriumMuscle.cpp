@@ -1039,9 +1039,11 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
             }
 
             fmAT = fm * mli.cosPennationAngle;
-            dFm_dlce = calcFiberStiffness(fiso, a,
-                                          mvi.fiberForceVelocityMultiplier,
-                                          mli.normFiberLength, optFiberLen);
+            // DFm_Dlce
+            double Dfal_Dlce  = curve_eval.fiberActiveForceLengthDeriv / optFiberLen;
+            double Dfpe_Dlce  = curve_eval.fiberPassiveForceLengthDeriv / optFiberLen;
+            dFm_dlce = fiso * (a*Dfal_Dlce* mvi.fiberForceVelocityMultiplier + Dfpe_Dlce);
+
             const double dFmAT_dlce =
                 calc_DFiberForceAT_DFiberLength(fm, dFm_dlce, mli.fiberLength,
                                                 mli.sinPennationAngle,
