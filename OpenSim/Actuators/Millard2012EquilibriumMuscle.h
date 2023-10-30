@@ -655,22 +655,6 @@ private:
                               double lceN,
                               double optFibLen) const;
 
-    /*  @param fiso the maximum isometric force the fiber can generate
-        @param a activation
-        @param fal the fiber active-force-length multiplier
-        @param beta damping coefficient
-        @param s damping force scaling
-        @param ds_d_dlce derivative of the damping scaling w.r.t. fiber length
-        @param dlceN_dt normalized fiber velocity (1 is the max. fiber velocity)
-        @param the maximum contraction velocity in m/s
-        @return the partial derivative of fiber force w.r.t normalized fiber
-    velocity */
-    double calc_DFiberForce_DNormFiberVelocity(double fiso,
-                                               double a,
-                                               double fal,
-                                               double beta,
-                                               double dlceN_dt) const;
-
     /*  @param fiberForce the force, in Newtons, developed by the fiber
         @param fiberStiffness the stiffness, in N/m, of the fiber
         @param lce the fiber length

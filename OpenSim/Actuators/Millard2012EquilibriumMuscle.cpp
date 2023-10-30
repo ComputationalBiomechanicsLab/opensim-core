@@ -1159,13 +1159,16 @@ calcDampedNormFiberVelocity(double fiso,
     double df_d_dlceNdt = 0.0;
 
     while(abs(err) > tol && iter < maxIter) {
-        fv = get_ForceVelocityCurve().calcValue(dlceN_dt);
+        std::pair<double, double> fv_value_and_derivative =
+            get_ForceVelocityCurve().calcValueAndDerivative(dlceN_dt, 1);
+        fv = fv_value_and_derivative.first;
+        double dfv = fv_value_and_derivative.second;
+
         fiberForceV = calcFiberForce(fiso,a,fal,fv,fpe,dlceN_dt);
         fiberForce = fiberForceV[0];
 
         err = fiberForce*cosPhi - fse*fiso;
-        df_d_dlceNdt = calc_DFiberForce_DNormFiberVelocity(fiso,a,fal,
-                                                           beta,dlceN_dt);
+        df_d_dlceNdt = fiso * (a*fal* dfv + beta);
         derr_d_dlceNdt = df_d_dlceNdt*cosPhi;
 
         if(abs(err) > tol && abs(derr_d_dlceNdt) > SimTK::SignificantReal) {
@@ -1260,18 +1263,6 @@ double Millard2012EquilibriumMuscle::calcFiberStiffness(double fiso,
 
     // DFm_Dlce
     return  fiso * (a*Dfal_Dlce*fv + Dfpe_Dlce);
-}
-
-double Millard2012EquilibriumMuscle::
-calc_DFiberForce_DNormFiberVelocity(double fiso,
-                                    double a,
-                                    double fal,
-                                    double beta,
-                                    double dlceN_dt) const
-{
-    // dfm_d_dlceNdt
-    return fiso * (a*fal*get_ForceVelocityCurve().calcDerivative(dlceN_dt,1)
-                   + beta);
 }
 
 double Millard2012EquilibriumMuscle::
