@@ -176,6 +176,17 @@ double ForceVelocityCurve::calcValue(double normFiberVelocity) const
     return m_curve.calcValue(normFiberVelocity);
 }
 
+std::pair<double, double> ForceVelocityCurve::calcValueAndDerivative(double normFiberVelocity, int order) const
+{
+    SimTK_ASSERT(isObjectUpToDateWithProperties(),
+        "ForceVelocityCurve: Curve is not up-to-date with its properties");
+    SimTK_ERRCHK1_ALWAYS(order >= 0 && order <= 2,
+        "ForceVelocityCurve::calcDerivative",
+        "order must be 0, 1, or 2, but %i was entered", order);
+
+    return m_curve.calcValueAndDerivative(normFiberVelocity,order);
+}
+
 double ForceVelocityCurve::calcDerivative(double normFiberVelocity,
                                           int order) const
 {

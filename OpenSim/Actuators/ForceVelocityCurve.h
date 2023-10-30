@@ -305,6 +305,11 @@ public:
     'normFiberVelocity'. */
     double calcValue(double normFiberVelocity) const;
 
+    /** See calcValue and calcDerivative, because this function has identical
+     functionality but is more efficient than calling them seperately.
+    */
+    std::pair<double, double> calcValueAndDerivative(double normFiberVelocity, int order) const;
+
     /** Calculates the derivative of the force-velocity multiplier with respect
     to the normalized fiber velocity.
     @param normFiberVelocity
