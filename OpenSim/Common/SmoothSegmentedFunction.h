@@ -135,7 +135,12 @@ namespace OpenSim {
        \endverbatim
     
        */
-       double calcDerivative(double x, int order) const;       
+       double calcDerivative(double x, int order) const;
+
+       /** See calcValue and calcDerivative, because this function has identical
+        functionality but is more efficient than calling them seperately.
+       */
+       std::pair<double, double> calcValueAndDerivative(double x, int order) const;
 
 #ifndef SWIG
        /// Allow the more general calcDerivative from the base class to be used.
@@ -439,6 +444,11 @@ namespace OpenSim {
        double calcDerivative(
                                const SimTK::Array_<int>& derivComponents, 
                                const SimTK::Vector& x) const override; 
+
+       /**
+       Refer to the documentation for calcValue(double x) because this function is identical in function to calcDerivative(double x)...
+       */
+       double calcDerivative(double x, int order, double& u, int& idx) const;
 
        /**This will return the size of the vector that the 
        calcValue(const SimTK::Vector& x) require. This is a required virtual 
