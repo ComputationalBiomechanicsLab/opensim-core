@@ -619,10 +619,12 @@ double SmoothSegmentedFunction::calcDerivative(double x, int order, double& u, i
         const double x1 = _smoothData->_x1;
         const double y1 = _smoothData->_y1;
         const double dydx1 = _smoothData->_dydx1;
-        switch (order) {
-            case 0: return y1 + dydx1*(x-x1);
-            case 1: return dydx1;
-            default: return 0.;
+        if(x > x1){
+            switch (order) {
+                case 0: return y1 + dydx1*(x-x1);
+                case 1: return dydx1;
+                default: return 0.;
+            }
         }
     }
 
