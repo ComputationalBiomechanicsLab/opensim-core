@@ -347,6 +347,7 @@ double SegmentedQuinticBezierToolkit::calcQuinticBezierCurveDerivDYDX(
 
                 val = y;
             }
+            break;
         case 1: // Calculate dy/dx
             { 
                 double dxdu =calcQuinticBezierCurveDerivU(u,xpts,1);
