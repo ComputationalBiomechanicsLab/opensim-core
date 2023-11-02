@@ -609,6 +609,7 @@ private:
         @param fpe the fiber force-length multiplier
         @param dlceN the normalized fiber velocity
         @param cosphi the cosine of the pennation angle
+        @param beta the fiber damping parameter
         @returns Vec4
             [0] total fiber force
             [1] active fiber force
@@ -619,7 +620,8 @@ private:
                                double fal,
                                double fv,
                                double fpe,
-                               double dlceN) const;
+                               double dlceN,
+                               double beta) const;
 
     /*  @param fiso the maximum isometric force the fiber can generate
         @param ftendon the current tendon load

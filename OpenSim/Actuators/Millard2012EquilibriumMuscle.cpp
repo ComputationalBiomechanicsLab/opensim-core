@@ -897,15 +897,15 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
 {
     try {
         // Get the quantities that we've already computed.
-        const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
-        const FiberVelocityInfo &mvi = getFiberVelocityInfo(s);
-        double fiberStateClamped = mvi.userDefinedVelocityExtras[0];
+        const MuscleLengthInfo &mli    = getMuscleLengthInfo(s);
+        const FiberVelocityInfo &mvi   = getFiberVelocityInfo(s);
+        const double fiberStateClamped = mvi.userDefinedVelocityExtras[0];
 
         // Get the properties of this muscle.
-        double tendonSlackLen = getTendonSlackLength();
-        double optFiberLen    = getOptimalFiberLength();
-        double fiso           = getMaxIsometricForce();
-        //double penHeight      = penMdl.getParallelogramHeight();
+        const double tendonSlackLen = getTendonSlackLength();
+        const double optFiberLen    = getOptimalFiberLength();
+        const double fiso           = getMaxIsometricForce();
+        const double beta           = getFiberDamping();
         const TendonForceLengthCurve& fseCurve = get_TendonForceLengthCurve();
 
         // Compute dynamic quantities.
@@ -943,7 +943,8 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
                                          mli.fiberActiveForceLengthMultiplier,
                                          mvi.fiberForceVelocityMultiplier,
                                          mli.fiberPassiveForceLengthMultiplier,
-                                         mvi.normFiberVelocity);
+                                         mvi.normFiberVelocity,
+                                         beta);
             fm   = fiberForceV[0];
             aFm  = fiberForceV[1];
             p1Fm = fiberForceV[2];
@@ -1160,7 +1161,7 @@ calcDampedNormFiberVelocity(double fiso,
 
     while(abs(err) > tol && iter < maxIter) {
         fv = get_ForceVelocityCurve().calcValue(dlceN_dt);
-        fiberForceV = calcFiberForce(fiso,a,fal,fv,fpe,dlceN_dt);
+        fiberForceV = calcFiberForce(fiso,a,fal,fv,fpe,dlceN_dt,beta);
         fiberForce = fiberForceV[0];
 
         err = fiberForce*cosPhi - fse*fiso;
@@ -1211,9 +1212,9 @@ calcFiberForce(double fiso,
                double fal,
                double fv,
                double fpe,
-               double dlceN) const
+               double dlceN,
+               double beta) const
 {
-    double beta = getFiberDamping();
     double fa   = fiso * (a*fal*fv);
     double fp1  = fiso * fpe;
     double fp2  = fiso * beta*dlceN;
@@ -1375,6 +1376,7 @@ Millard2012EquilibriumMuscle::MuscleStateEstimate
     const double ofl       = getOptimalFiberLength();
     const double fiso      = getMaxIsometricForce();
     const double vmax      = getMaxContractionVelocity();
+    const double beta      = getFiberDamping();
 
     const TendonForceLengthCurve& fseCurve = get_TendonForceLengthCurve();
     const FiberForceLengthCurve& fpeCurve  = get_FiberForceLengthCurve();
@@ -1438,7 +1440,7 @@ Millard2012EquilibriumMuscle::MuscleStateEstimate
 
     // Functional to compute the equilibrium force error
     auto ferrFunc = [&] {
-        fiberForceV = calcFiberForce(fiso, ma, fal, fv, fpe, dlceN);
+        fiberForceV = calcFiberForce(fiso, ma, fal, fv, fpe, dlceN, beta);
         Fm = fiberForceV[0];
         FmAT = Fm * cosphi;
         Ft = fse*fiso;
@@ -1523,7 +1525,7 @@ Millard2012EquilibriumMuscle::MuscleStateEstimate
     // Starting guess at the force-velocity multiplier is static
     fv = 1.0;
 
-    fiberForceV = calcFiberForce(fiso, ma, fal, fv, fpe, dlceN);
+    fiberForceV = calcFiberForce(fiso, ma, fal, fv, fpe, dlceN, beta);
     Fm = fiberForceV[0];
 
     // Compute the partial derivative of the force error w.r.t. lce
@@ -1672,7 +1674,8 @@ calcActiveFiberForceAlongTendon(double activation,
         double phi = getPennationModel().calcPennationAngle(lceN);
 
         //Compute the active fiber force
-        Vec4 fiberForceV = calcFiberForce(fiso,ca,fal,fv,fpe,dlceN);
+        const double beta = getFiberDamping();
+        Vec4 fiberForceV = calcFiberForce(fiso,ca,fal,fv,fpe,dlceN,beta);
         double fa = fiberForceV[1];
         activeFiberForce = fa * cos(phi);
 
