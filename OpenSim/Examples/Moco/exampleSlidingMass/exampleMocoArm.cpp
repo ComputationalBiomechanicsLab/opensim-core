@@ -1,11 +1,10 @@
 #include "OpenSim/Simulation/Model/Geometry.h"
+#include <OpenSim/Moco/osimMoco.h>
+#include <OpenSim/OpenSim.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
-
-#include <OpenSim/Moco/osimMoco.h>
-#include <OpenSim/OpenSim.h>
-#include <OpenSim/Simulation/SimbodyEngine/SliderJoint.h>
 
 using namespace OpenSim;
 using Vec3 = SimTK::Vec3;
@@ -13,8 +12,6 @@ using Inertia = SimTK::Inertia;
 
 namespace {
     const std::string MODEL_NAME = std::string("arm");
-    const std::string UPPER_ARM_NAME = std::string("upper-arm");
-    const std::string LOWER_ARM_NAME = std::string("lower-arm");
     const std::string HAND_NAME = std::string("hand");
 
     const std::string SHOULDER_JOINT_NAME = std::string("shoulder");
@@ -52,17 +49,17 @@ std::unique_ptr<Model> createModel() {
         Inertia inertia = mass * Inertia::brick(Vec3(length / 2.));
 
         // Pelvis component.
-        std::unique_ptr<Body> body(new Body(HAND_NAME, mass, cog, inertia));
+        Body body(HAND_NAME, mass, cog, inertia);
 
         // Make pretty.
-        std::unique_ptr<Brick> geometry = std::unique_ptr<Brick>(new
-                Brick(
-                Vec3{length, 3*length, 0.1*length}));
-        geometry->setColor(SimTK::Vec3(0.1, 0.1, 0.8));
-        body->attachGeometry(geometry.release());
+        {
+            Brick geometry = Brick(Vec3{length, 3*length, 0.1*length});
+            geometry.setColor(SimTK::Vec3(0.1, 0.1, 0.8));
+            body.attachGeometry(new Brick(geometry));
+        }
 
         // Add to model.
-        model.addComponent(body.release());
+        model.addComponent(new Body(body));
     }
 
     // Add the elbow.
@@ -188,6 +185,15 @@ std::unique_ptr<Model> createModel() {
     }
 
     model.finalizeConnections();
+    model.initSystem();
+    model.printSubcomponentInfo();
+    model.printOutputInfo(true);
+    auto names = model.getStateVariableNames();
+    for (int i = 0; i < names.size(); ++i) {
+        std::cout << "name = " << names[i] << std::endl;
+    }
+
+    /* std::cout << "HAND abs path = " << model.getComponent<Body>(HAND_NAME).getAbsolutePath().toString() << std::endl; */
 
     return std::unique_ptr<Model>(new Model(model));
 }
@@ -203,10 +209,6 @@ int main() {
 
     // Model (dynamics).
     // -----------------
-    /* std::unique_ptr<OpenSim::Model> model = createModel(); */
-    /* model->print("MocoFooArm.osim"); */
-    /* model->printSubcomponentInfo(); */
-
     problem.setModel(createModel());
 
     // Cost.
@@ -215,7 +217,7 @@ int main() {
 
     // Bounds.
     // -------
-    double finalTime = 1.0;
+    double finalTime = 10.0;
     problem.setTimeBounds(0, finalTime);
 
     // Position must be within [-5, 5] throughout the motion.
@@ -232,21 +234,21 @@ int main() {
 
     // Cost.
     // -----
-    auto* tracking = problem.addGoal<MocoStateTrackingGoal>("tracking");
-    TimeSeriesTable ref;
-    ref.addTableMetaData<std::string>("inDegrees", "no");
-    ref.setColumnLabels({"/shoulder/angle/value", "/elbow/angle/value"});
-    // We supply a reference whose time range is a superset of the problem's
-    // time bounds: Moco performs finite differences internally, which may
-    // require sampling outside the problem's time bounds.
-    for (double time = -0.05; time < finalTime + 0.05; time += 0.01) {
-        ref.appendRow(time, {
-                0.5 * SimTK::Pi * time,
-                0.0 * SimTK::Pi * time
-        });
-    }
+    auto* tracking = problem.addGoal<MocoOutputTrackingGoal>("tracking");
+    /* TimeSeriesTable ref; */
+    /* ref.addTableMetaData<std::string>("inDegrees", "no"); */
+    /* ref.setColumnLabels({"/hand/position"}); */
+    /* // We supply a reference whose time range is a superset of the problem's */
+    /* // time bounds: Moco performs finite differences internally, which may */
+    /* // require sampling outside the problem's time bounds. */
+    /* for (double time = -0.05; time < finalTime + 0.05; time += 0.01) { */
+    /*     ref.appendRow(time, { */
+    /*             0.0 * SimTK::Pi * time / finalTime */
+    /*     }); */
+    /* } */
 
-    tracking->setReference(ref);
+    tracking->setOutputPath("/hand|position");
+    /* tracking->setReference(ref); */
 
     // A low-weighted cost term minimizing controls helps with convergence.
     problem.addGoal<MocoControlGoal>("effort", 0.001);
