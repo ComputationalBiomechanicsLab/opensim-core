@@ -23,7 +23,8 @@ namespace {
 
     const std::string ELBOW_FAT_NAME = std::string("elbow-fat");
     const std::string ELBOW_JOINT_NAME = std::string("elbow");
-    const std::string ELBOW_ANGLE_NAME = std::string("elbow-angle");
+    const std::string ELBOW_ANGLE_NAME = std::string("angle");
+
     const std::string ELBOW_MUSCLE_NAME = std::string("elbow-muscle");
 } // namespace
 
@@ -33,6 +34,14 @@ std::unique_ptr<Model> createModel() {
 
     // Set gravity.
     model.setGravity(SimTK::Vec3(0, -9.80665, 0));
+
+    // Add shoulder geometry.
+    {
+        // Make pretty.
+        std::unique_ptr<Brick> geometry = std::unique_ptr<Brick>(new Brick({0.01, 0.01,1.}));
+        geometry->setColor(SimTK::Vec3(0.1, 0.1, 0.8));
+        model.updGround().attachGeometry(geometry.release());
+    }
 
     // Add the hand.
     {
@@ -157,8 +166,22 @@ std::unique_ptr<Model> createModel() {
         OpenSim::Joint& joint = model.updComponent<Joint>(SHOULDER_JOINT_NAME);
         OpenSim::Coordinate& coord = joint.updCoordinate();
 
-        muscle->setCoordinate(&coord);
         muscle->setName(SHOULDER_MUSCLE_NAME);
+        muscle->setCoordinate(&coord);
+        muscle->setOptimalForce(1);
+
+        model.addComponent(muscle.release());
+    }
+
+    // Connect actuator to elbow.
+    {
+        std::unique_ptr<CoordinateActuator> muscle = std::unique_ptr<CoordinateActuator>(new CoordinateActuator());
+
+        OpenSim::Joint& joint = model.updComponent<Joint>(ELBOW_JOINT_NAME);
+        OpenSim::Coordinate& coord = joint.updCoordinate();
+
+        muscle->setName(ELBOW_MUSCLE_NAME);
+        muscle->setCoordinate(&coord);
         muscle->setOptimalForce(1);
 
         model.addComponent(muscle.release());
@@ -205,19 +228,21 @@ int main() {
 
     // Applied force must be between -50 and 50.
     problem.setControlInfo("/muscle", MocoBounds(-50, 50));
+    problem.setControlInfo("/elbow-muscle", MocoBounds(-50, 50));
 
     // Cost.
     // -----
     auto* tracking = problem.addGoal<MocoStateTrackingGoal>("tracking");
     TimeSeriesTable ref;
     ref.addTableMetaData<std::string>("inDegrees", "no");
-    ref.setColumnLabels({"/shoulder/angle/value"});
+    ref.setColumnLabels({"/shoulder/angle/value", "/elbow/angle/value"});
     // We supply a reference whose time range is a superset of the problem's
     // time bounds: Moco performs finite differences internally, which may
     // require sampling outside the problem's time bounds.
     for (double time = -0.05; time < finalTime + 0.05; time += 0.01) {
         ref.appendRow(time, {
-                0.5 * SimTK::Pi * time
+                0.5 * SimTK::Pi * time,
+                0.0 * SimTK::Pi * time
         });
     }
 
