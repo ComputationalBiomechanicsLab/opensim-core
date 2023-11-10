@@ -412,7 +412,7 @@ getActivationDerivative(const SimTK::State& s) const
     if (get_ignore_activation_dynamics())
         return 0.0;
 
-    return getActivationModel().calcDerivative(getActivation(s),
+    return getActivationModel().calcDerivative(getMuscleStateInfo(s)._msi.get()->activation,
                                                getExcitation(s));
 }
 
