@@ -853,10 +853,18 @@ private:
                 const SimTK::State& state) const;
     };
 
-    class MuscleStateInfoCacheVariable
+    struct MuscleStateInfoCacheVariable
     {
-        std::unique_ptr<MuscleStateInfo> msi;
+        double getFiberForce() const;
+
+        double getFiberVelocity() const;
+
+        std::unique_ptr<MuscleStateInfo> _msi {nullptr};
     };
+
+    mutable CacheVariable<MuscleStateInfoCacheVariable> _muscleStateInfo;
+
+    const MuscleStateInfoCacheVariable& getMuscleStateInfo(const SimTK::State& s) const;
 
     struct MuscleRigidStateInfo: MuscleStateInfo
     {
