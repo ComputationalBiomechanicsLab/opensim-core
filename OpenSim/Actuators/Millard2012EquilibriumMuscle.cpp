@@ -697,8 +697,16 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     fiberLength = calcFiberLength(muscle, state);
     normFiberLength   = fiberLength / optimalFiberLength;
 
+    SimTK_ERRCHK_ALWAYS(fiberLength > SimTK::SignificantReal,
+            "calcMuscleDynamicsInfo",
+            "The muscle fiber has a length of 0, causing a singularity");
+
     pennationAngle    = penModel.calcPennationAngle(fiberLength);
     cosPennationAngle = cos(pennationAngle);
+
+    SimTK_ERRCHK_ALWAYS(cosPennationAngle > SimTK::SignificantReal,
+            "calcMuscleDynamicsInfo",
+            "Pennation angle is 90 degrees, causing a singularity");
 
     tendonLength      = penModel.calcTendonLength(
             cosPennationAngle,
@@ -724,14 +732,6 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
 
     fiberForceAlongTendon = fiberForce * cosPennationAngle;
     /* tendonForce = calcTendonForce(muscle, state); */
-
-    /* // Compute the stiffness of the muscle fiber. */
-    /* SimTK_ERRCHK_ALWAYS(fiberLength > SimTK::SignificantReal, */
-    /*         "calcMuscleDynamicsInfo", */
-    /*         "The muscle fiber has a length of 0, causing a singularity"); */
-    /* SimTK_ERRCHK_ALWAYS(cosPennationAngle > SimTK::SignificantReal, */
-    /*         "calcMuscleDynamicsInfo", */
-    /*         "Pennation angle is 90 degrees, causing a singularity"); */
 }
 
 double Millard2012EquilibriumMuscle::MuscleStateInfo::calcFiberLength(
@@ -1277,8 +1277,6 @@ void Millard2012EquilibriumMuscle::
 extendAddToSystem(SimTK::MultibodySystem& system) const
 {
     Super::extendAddToSystem(system);
-    MuscleStateInfoCacheVariable msiCache {};
-
     if(!get_ignore_activation_dynamics()) {
         addStateVariable(STATE_ACTIVATION_NAME);
     }
@@ -1286,15 +1284,20 @@ extendAddToSystem(SimTK::MultibodySystem& system) const
         addStateVariable(STATE_FIBER_LENGTH_NAME);
     }
     if(get_ignore_tendon_compliance()) {
-        msiCache._msi = std::unique_ptr<Millard2012EquilibriumMuscle::MuscleStateInfo>(new Millard2012EquilibriumMuscle::MuscleRigidStateInfo());
+        this->_muscleStateInfo = addCacheVariable("muscleStateInfo",
+                Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable::NewRigidState(),
+                SimTK::Stage::Velocity);
     } else {
         if(use_fiber_damping) {
-            msiCache._msi = std::unique_ptr<Millard2012EquilibriumMuscle::MuscleStateInfo>(new Millard2012EquilibriumMuscle::MuscleDampedEquilibriumStateInfo());
+            this->_muscleStateInfo = addCacheVariable("muscleStateInfo",
+                    Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable::NewDampedState(),
+                    SimTK::Stage::Velocity);
         } else {
-            msiCache._msi = std::unique_ptr<Millard2012EquilibriumMuscle::MuscleStateInfo>(new Millard2012EquilibriumMuscle::MuscleEquilibriumStateInfo());
+            this->_muscleStateInfo = addCacheVariable("muscleStateInfo",
+                    Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable::NewEquilibriumState(),
+                    SimTK::Stage::Velocity);
         }
     }
-    this->_muscleStateInfo = addCacheVariable("muscleStateInfo", std::move(msiCache), SimTK::Stage::Velocity);
 }
 
 /* Access to muscle calculation data structures */
@@ -1305,7 +1308,14 @@ const Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable& Millard2012Equ
     }
 
     Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable& msi = updCacheVariableValue(s, _muscleStateInfo);
-    msi._msi->calculate(*this, s);
+    try {
+        msi._msi->calculate(*this, s);
+    } catch(const std::exception &x) {
+        std::string msg = "Exception caught in Millard2012EquilibriumMuscle::"
+                          "MuscleStateInfoCacheVariable::calculate from " + getName() + "\n"
+                          + x.what();
+        throw OpenSim::Exception(msg);
+    }
     markCacheVariableValid(s, _muscleStateInfo);
     return msi;
 }
