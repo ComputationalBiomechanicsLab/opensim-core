@@ -768,6 +768,136 @@ private:
                                  const int aMaxIterations,
                                  bool staticSolution=false) const;
 
+    // Override: computeActuation() -> setActuation(s, MuscleXXXStateInfo.fiberForce)
+    // Override: computeStateVariableDerivatives() -> setStateVariableDerivativeValue(s, MuscleStateInfo)
+    struct MuscleStateInfo
+    {
+        // Parameters.
+        double fiberDamping {SimTK::NaN};
+        double maxContractionVelocity {SimTK::NaN};
+        double maxIsometricForce {SimTK::NaN};
+        double optimalFiberLength {SimTK::NaN};
+        double tendonSlackLength {SimTK::NaN};
+
+        // From state.
+        double activation {SimTK::NaN};
+
+        // From length info.
+        double muscleLength = { SimTK::NaN};
+        double tendonLength     { SimTK::NaN};
+        double normTendonLength { SimTK::NaN};
+
+        double fiberLength            { SimTK::NaN};
+        double normFiberLength        { SimTK::NaN};
+
+        double pennationAngle    { SimTK::NaN};
+        double cosPennationAngle { SimTK::NaN};
+
+        // From velocity info.
+        double normFiberVelocity            { SimTK::NaN}; // dlce
+        double fiberForceVelocityMultiplier { SimTK::NaN};
+        double fiberVelocity                { SimTK::NaN}; // dlce
+
+        bool isFiberStateClamped {false};
+
+        // From dynamics info.
+        double fiberPassiveForceLengthMultiplier           { SimTK::NaN};
+        /* double fiberPassiveForceLengthMultiplierDerivative { SimTK::NaN}; */
+        double fiberActiveForceLengthMultiplier            { SimTK::NaN};
+        /* double fiberActiveForceLengthMultiplierDerivative  { SimTK::NaN}; */
+
+        // From dynamics info.
+        double fiberForce            { SimTK::NaN};
+        double fiberForceAlongTendon { SimTK::NaN};
+
+        /* struct TendonForceInfo */
+        /* { */
+        /*     double tendonForce {SimTK::NaN}; */
+        /*     double normTendonForce {SimTK::NaN}; */
+        /*     double tendonForceLengthMultiplier {SimTK::NaN}; */
+        /*     double tendonForceLengthMultiplierDerivative {SimTK::NaN}; */
+        /* } tendonForce; */
+
+
+        virtual void calculate(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state);
+
+        /* virtual void calcMuscleLengthInfo( */
+        /*         const Millard2012EquilibriumMuscle& muscle, */
+        /*         const SimTK::State& state, */
+        /*         Muscle::MuscleLengthInfo& mli) const = 0; */
+
+        /* virtual void calcFiberVelocityInfo( */
+        /*         const Millard2012EquilibriumMuscle& muscle, */
+        /*         const SimTK::State& state, */
+        /*         Muscle::FiberVelocityInfo& mli) const = 0; */
+
+        /* virtual void calcMuscleDynamicsInfo( */
+        /*         const Millard2012EquilibriumMuscle& muscle, */
+        /*         const SimTK::State& state, */
+        /*         Muscle::MuscleDynamicsInfo& mli) const = 0; */
+
+        protected:
+
+        virtual double calcFiberLength(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const;
+
+        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const = 0;
+
+        virtual double calcFiberForce(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const;
+    };
+
+    class MuscleStateInfoCacheVariable
+    {
+        std::unique_ptr<MuscleStateInfo> msi;
+    };
+
+    struct MuscleRigidStateInfo: MuscleStateInfo
+    {
+        /* double muscleLengtheningSpeed {SimTK::NaN}; */
+
+        private:
+
+        virtual double calcFiberLength(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const override final;
+
+        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const override final;
+
+        virtual double calcFiberForce(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const override final;
+    };
+
+    struct MuscleEquilibriumStateInfo: MuscleStateInfo
+    {
+        /* double tendonForceLengthMultiplier           { SimTK::NaN}; */
+        /* double tendonForceLengthMultiplierDerivative { SimTK::NaN}; */
+        /* double inverseFiberForceVelocityMultiplier   { SimTK::NaN}; */
+
+        private:
+
+        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const override final;
+    };
+
+    struct MuscleDampedEquilibriumStateInfo: MuscleStateInfo {
+        private:
+
+        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
+                const Millard2012EquilibriumMuscle& muscle,
+                const SimTK::State& state) const override final;
+    };
+
 };
 } //end of namespace OpenSim
 
