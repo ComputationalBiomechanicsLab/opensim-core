@@ -804,28 +804,22 @@ private:
 
         // From dynamics info.
         double fiberPassiveForceLengthMultiplier           { SimTK::NaN};
-        /* double fiberPassiveForceLengthMultiplierDerivative { SimTK::NaN}; */
+        double fiberPassiveForceLengthMultiplierDerivative { SimTK::NaN};
         double fiberActiveForceLengthMultiplier            { SimTK::NaN};
-        /* double fiberActiveForceLengthMultiplierDerivative  { SimTK::NaN}; */
+        double fiberActiveForceLengthMultiplierDerivative  { SimTK::NaN};
 
         // From dynamics info.
         double fiberForce            { SimTK::NaN};
         double fiberForceAlongTendon { SimTK::NaN};
 
-        /* struct TendonForceInfo */
-        /* { */
-        /*     double tendonForce {SimTK::NaN}; */
-        /*     double normTendonForce {SimTK::NaN}; */
-        /*     double tendonForceLengthMultiplier {SimTK::NaN}; */
-        /*     double tendonForceLengthMultiplierDerivative {SimTK::NaN}; */
-        /* } tendonForce; */
+        double tendonForce                           { SimTK::NaN};
+        double normTendonForce                       { SimTK::NaN};
+        double tendonForceLengthMultiplier           { SimTK::NaN};
+        double tendonForceLengthMultiplierDerivative { SimTK::NaN};
 
-
-        virtual void calculate(
+        void calculate(
                 const Millard2012EquilibriumMuscle& muscle,
                 const SimTK::State& state);
-
-        virtual std::unique_ptr<MuscleStateInfo> clone() const = 0;
 
         /* virtual void calcMuscleLengthInfo( */
         /*         const Millard2012EquilibriumMuscle& muscle, */
@@ -842,134 +836,24 @@ private:
         /*         const SimTK::State& state, */
         /*         Muscle::MuscleDynamicsInfo& mli) const = 0; */
 
-        protected:
-
-        virtual double calcFiberLength(
-                const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const;
-
-        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
-                const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const = 0;
-
-        virtual double calcFiberForce(
-                const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const;
-    };
-
-    struct MuscleRigidStateInfo: MuscleStateInfo
-    {
-        /* double muscleLengtheningSpeed {SimTK::NaN}; */
-        MuscleRigidStateInfo(): MuscleStateInfo() {}
-
-        std::unique_ptr<MuscleStateInfo> clone() const override
-        {
-            return std::unique_ptr<MuscleStateInfo>(new MuscleRigidStateInfo(*this));
-        }
+        private:
 
         double calcFiberLength(
                 const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const override final;
+                const SimTK::State& state) const;
 
         std::pair<double, double> calcNormFiberVelocityAndMultiplier(
                 const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const override final;
+                const SimTK::State& state) const;
 
         double calcFiberForce(
                 const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const override final;
+                const SimTK::State& state) const;
     };
 
-    struct MuscleEquilibriumStateInfo: MuscleStateInfo
-    {
-        /* double tendonForceLengthMultiplier           { SimTK::NaN}; */
-        /* double tendonForceLengthMultiplierDerivative { SimTK::NaN}; */
-        /* double inverseFiberForceVelocityMultiplier   { SimTK::NaN}; */
+    mutable CacheVariable<Millard2012EquilibriumMuscle::MuscleStateInfo> _muscleStateInfo;
 
-        MuscleEquilibriumStateInfo(): MuscleStateInfo() {}
-
-        std::unique_ptr<MuscleStateInfo> clone() const override
-        {
-            return std::unique_ptr<MuscleStateInfo>(new MuscleEquilibriumStateInfo(*this));
-        }
-
-        private:
-
-        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
-                const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const override final;
-    };
-
-    struct MuscleDampedEquilibriumStateInfo: MuscleStateInfo {
-
-        MuscleDampedEquilibriumStateInfo(): MuscleStateInfo() {}
-
-        std::unique_ptr<MuscleStateInfo> clone() const override
-        {
-            return std::unique_ptr<MuscleStateInfo>(new MuscleDampedEquilibriumStateInfo(*this));
-        }
-
-        private:
-
-        virtual std::pair<double, double> calcNormFiberVelocityAndMultiplier(
-                const Millard2012EquilibriumMuscle& muscle,
-                const SimTK::State& state) const override final;
-    };
-
-    struct MuscleStateInfoCacheVariable
-    {
-        // Default constructor.
-        MuscleStateInfoCacheVariable(): _msi(nullptr) {}
-
-        ~MuscleStateInfoCacheVariable() = default;
-
-        // Move constructor.
-        MuscleStateInfoCacheVariable(
-        MuscleStateInfoCacheVariable&& other)
-            : _msi{std::move(other._msi)} {}
-
-        // Copy constructor.
-        MuscleStateInfoCacheVariable(const MuscleStateInfoCacheVariable& other)
-            : _msi{other._msi.get()->clone()}
-        {}
-
-        MuscleStateInfoCacheVariable& operator=(const MuscleStateInfoCacheVariable& other)
-        {
-            _msi = other._msi.get()->clone();
-            return *this;
-        }
-
-        static MuscleStateInfoCacheVariable NewRigidState()
-        {
-            MuscleStateInfoCacheVariable out;
-            out._msi = std::unique_ptr<MuscleStateInfo>(new MuscleRigidStateInfo{});
-            return out;
-        }
-
-        static MuscleStateInfoCacheVariable NewEquilibriumState()
-        {
-            MuscleStateInfoCacheVariable out;
-            out._msi = std::unique_ptr<MuscleStateInfo>(new MuscleEquilibriumStateInfo{});
-            return out;
-        }
-
-        static MuscleStateInfoCacheVariable NewDampedState()
-        {
-            MuscleStateInfoCacheVariable out;
-            out._msi = std::unique_ptr<MuscleStateInfo>(new MuscleDampedEquilibriumStateInfo{});
-            return out;
-        }
-
-        double getFiberForce() const;
-
-        double getFiberVelocity() const;
-
-        std::unique_ptr<MuscleStateInfo> _msi {nullptr};
-    };
-
-    mutable CacheVariable<Millard2012EquilibriumMuscle::MuscleStateInfoCacheVariable> _muscleStateInfo;
-
-    const MuscleStateInfoCacheVariable& getMuscleStateInfo(const SimTK::State& s) const;
+    const MuscleStateInfo& getMuscleStateInfo(const SimTK::State& s) const;
 
 };
 } //end of namespace OpenSim

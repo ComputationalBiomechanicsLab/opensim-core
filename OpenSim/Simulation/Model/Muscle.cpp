@@ -675,8 +675,8 @@ double Muscle::computePotentialEnergy(const SimTK::State& s) const
 }
 
 SimTK::Vec3 Muscle::computePathColor(const SimTK::State& state) const {
-    const double activation =
-        SimTK::clamp(0., getActivation(state), 1.);
+    const double activation = 0.1;
+        /* SimTK::clamp(0., getActivation(state), 1.); */
     const SimTK::Vec3 color(activation, 0, 1-activation); // blue to red
     return color;
 }
