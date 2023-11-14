@@ -412,7 +412,7 @@ getActivationDerivative(const SimTK::State& s) const
     if (get_ignore_activation_dynamics())
         return 0.0;
 
-    return getActivationModel().calcDerivative(getMuscleStateInfo(s).activation,
+    return getActivationModel().calcDerivative(getActivation(s),
                                                getExcitation(s));
 }
 
@@ -707,6 +707,11 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     fiberLength = calcFiberLength(muscle, state);
     normFiberLength   = fiberLength / optimalFiberLength;
 
+    fiberPassiveForceLengthMultiplier = fpeCurve.calcValue(normFiberLength);
+    /* fiberPassiveForceLengthMultiplierDerivative = SimTK::NaN; */
+    fiberActiveForceLengthMultiplier = falCurve.calcValue(normFiberLength);
+    /* fiberActiveForceLengthMultiplierDerivative = SimTK::NaN; */
+
     /* std::cout << "muscle-fiberLength = "<< fiberLength << " or " << muscle.getMuscleLengthInfo(state).fiberLength << std::endl; */
 
     /* SimTK_ERRCHK_ALWAYS( */
@@ -763,10 +768,6 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     /*         "Muscle fiber velocity result must match"); */
 
     // Muscle dynamics.
-    fiberPassiveForceLengthMultiplier = fpeCurve.calcValue(normFiberLength);
-    /* fiberPassiveForceLengthMultiplierDerivative = SimTK::NaN; */
-    fiberActiveForceLengthMultiplier = falCurve.calcValue(normFiberLength);
-    /* fiberActiveForceLengthMultiplierDerivative = SimTK::NaN; */
 
     fiberForce = calcFiberForce(muscle, state);
 
