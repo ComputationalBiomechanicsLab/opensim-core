@@ -537,6 +537,11 @@ computeActuation(const SimTK::State& s) const
     return force;
 }
 
+double Millard2012EquilibriumMuscle::getActivation(const SimTK::State& s) const
+{
+    return getMuscleStateInfo(s).activation;
+}
+
 void Millard2012EquilibriumMuscle::
 computeFiberEquilibrium(SimTK::State& s, bool solveForVelocity) const
 {

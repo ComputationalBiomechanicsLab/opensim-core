@@ -446,6 +446,8 @@ public:
 
     virtual double getSpeed( const SimTK::State& s) const override;
 
+    virtual double getActivation( const SimTK::State& s) const override;
+
 //==============================================================================
 // DEPRECATED
 //==============================================================================
