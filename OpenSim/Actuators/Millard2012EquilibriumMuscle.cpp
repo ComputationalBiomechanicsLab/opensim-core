@@ -826,7 +826,7 @@ std::pair<double, double> Millard2012EquilibriumMuscle::MuscleStateInfo::calcNor
             "Fiber damping coefficient must be greater than 0.");
 
     // Newton solve for fiber velocity.
-    SimTK::Vec3 fiberVelocityV = muscle.calcDampedNormFiberVelocity(
+    SimTK::Vec4 fiberVelocityV = muscle.calcDampedNormFiberVelocity(
             maxIsometricForce, activation, fiberActiveForceLengthMultiplier,
             fiberPassiveForceLengthMultiplier, fse, fiberDamping,
             cosPennationAngle);
@@ -834,7 +834,7 @@ std::pair<double, double> Millard2012EquilibriumMuscle::MuscleStateInfo::calcNor
     // If the Newton method converged, update the fiber velocity.
     if(fiberVelocityV[2] > 0.5) { //flag is set to 0.0 or 1.0
         double dlceN = fiberVelocityV[0];
-        double fv = muscle.get_ForceVelocityCurve().calcValue(dlceN);
+        double fv = fiberVelocityV[3];
         return std::make_pair(dlceN, fv);
     }
 
@@ -1030,7 +1030,7 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
                 "calcFiberVelocityInfo",
                 "Fiber damping coefficient must be greater than 0.");
 
-            SimTK::Vec3 fiberVelocityV = calcDampedNormFiberVelocity(
+            SimTK::Vec4 fiberVelocityV = calcDampedNormFiberVelocity(
                 getMaxIsometricForce(), a, mli.fiberActiveForceLengthMultiplier,
                 mli.fiberPassiveForceLengthMultiplier, fse, beta,
                 mli.cosPennationAngle);
@@ -1350,7 +1350,7 @@ void Millard2012EquilibriumMuscle::
 //==============================================================================
 // PRIVATE METHODS
 //==============================================================================
-SimTK::Vec3 Millard2012EquilibriumMuscle::
+SimTK::Vec4 Millard2012EquilibriumMuscle::
 calcDampedNormFiberVelocity(double fiso,
                             double a,
                             double fal,
@@ -1360,7 +1360,7 @@ calcDampedNormFiberVelocity(double fiso,
                             double cosPhi) const
 {
     SimTK::Vec4 fiberForceV;
-    SimTK::Vec3 result;
+    SimTK::Vec4 result;
 
     int maxIter = 20; //this routine converges quickly; 20 is quite generous
     double tol = 1.0e-10*fiso;
@@ -1389,14 +1389,17 @@ calcDampedNormFiberVelocity(double fiso,
 
     double df_d_dlceNdt = 0.0;
 
+    const ForceVelocityCurve& fvCurve = get_ForceVelocityCurve();
     while(abs(err) > tol && iter < maxIter) {
-        fv = get_ForceVelocityCurve().calcValue(dlceN_dt);
+        std::pair<double, double> valueAndDerivative = fvCurve.calcValueAndFirstDerivative(dlceN_dt);
+        fv = valueAndDerivative.first;
+        double dfv = valueAndDerivative.second;
+
         fiberForceV = calcFiberForce(fiso,a,fal,fv,fpe,dlceN_dt);
         fiberForce = fiberForceV[0];
 
         err = fiberForce*cosPhi - fse*fiso;
-        df_d_dlceNdt = calc_DFiberForce_DNormFiberVelocity(fiso,a,fal,
-                                                           beta,dlceN_dt);
+        df_d_dlceNdt = fiso * (a*fal*dfv + beta);
         derr_d_dlceNdt = df_d_dlceNdt*cosPhi;
 
         if(abs(err) > tol && abs(derr_d_dlceNdt) > SimTK::SignificantReal) {
@@ -1426,6 +1429,7 @@ calcDampedNormFiberVelocity(double fiso,
     result[0] = dlceN_dt;
     result[1] = err;
     result[2] = converged;
+    result[3] = fv;
     return result;
 }
 

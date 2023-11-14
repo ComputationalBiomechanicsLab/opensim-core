@@ -587,7 +587,7 @@ private:
         @returns [0] dlceN_dt
                  [1] err
                  [2] converged */
-    SimTK::Vec3 calcDampedNormFiberVelocity(double fiso,
+    SimTK::Vec4 calcDampedNormFiberVelocity(double fiso,
                                             double a,
                                             double fal,
                                             double fpe,
