@@ -653,6 +653,13 @@ double SmoothSegmentedFunction::calcDerivative(double x, int order) const
     return calcSelectedDerivatives(x, orders, _smoothData)[order];
 }
 
+std::pair<double, double> SmoothSegmentedFunction::calcValueAndFirstDerivative(double x) const
+{
+    bool orders[6] = {true, true, false, false, false, false};
+    SimTK::Vec6 y = calcSelectedDerivatives(x, orders, _smoothData);
+    return std::make_pair(y[0], y[1]);
+}
+
 double SmoothSegmentedFunction::
     calcDerivative(const SimTK::Array_<int>& derivComponents,
                  const SimTK::Vector& ax) const

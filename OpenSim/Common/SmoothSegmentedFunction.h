@@ -137,6 +137,8 @@ namespace OpenSim {
        */
        double calcDerivative(double x, int order) const;       
 
+       std::pair<double, double> calcValueAndFirstDerivative(double x) const;
+
 #ifndef SWIG
        /// Allow the more general calcDerivative from the base class to be used.
        // This helps avoid the -Woverloaded-virtual warning with Clang.
