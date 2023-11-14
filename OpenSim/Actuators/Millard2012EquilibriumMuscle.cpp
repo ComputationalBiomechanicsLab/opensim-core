@@ -712,17 +712,6 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     fiberActiveForceLengthMultiplier = falCurve.calcValue(normFiberLength);
     /* fiberActiveForceLengthMultiplierDerivative = SimTK::NaN; */
 
-    /* std::cout << "muscle-fiberLength = "<< fiberLength << " or " << muscle.getMuscleLengthInfo(state).fiberLength << std::endl; */
-
-    /* SimTK_ERRCHK_ALWAYS( */
-    /* std::abs(muscle.getMuscleLengthInfo(state).fiberLength - fiberLength) < 1e-10, */
-    /*         "calcMuscleStateInfo", */
-    /*         "Muscle length result must match"); */
-
-    /* SimTK_ERRCHK_ALWAYS(!std::isnan(fiberLength), */
-    /*         "calcMuscleStateInfo", */
-    /*         "Fiber length is NaN."); */
-
     SimTK_ERRCHK_ALWAYS(fiberLength > SimTK::SignificantReal,
             "calcMuscleStateInfo",
             "The muscle fiber has a length of 0, causing a singularity");
@@ -755,42 +744,13 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     } else {
         fiberVelocity = normFiberVelocity * maxContractionVelocity * optimalFiberLength;
     }
-    /* SimTK_ERRCHK_ALWAYS(!std::isnan(fiberVelocity), */
-    /*         "calcMuscleStateInfo", */
-    /*         "Fiber velocity is NaN."); */
-
-    /* std::cout << "muscle-fiberVelocity = "<< fiberVelocity << " or " << muscle.getFiberVelocityInfo(state).fiberVelocity << std::endl; */
-    /* std::cout << "get ignore"<< muscle.get_ignore_tendon_compliance() << std::endl; */
-    /* std::cout << "get fiber damping"<< muscle.use_fiber_damping << std::endl; */
-    /* SimTK_ERRCHK_ALWAYS( */
-    /* std::abs(muscle.getFiberVelocityInfo(state).fiberVelocity - fiberVelocity) < 1e-10, */
-    /*         "calcMuscleStateInfo", */
-    /*         "Muscle fiber velocity result must match"); */
 
     // Muscle dynamics.
-
     fiberForce = calcFiberForce(muscle, state);
-
-    /* SimTK_ERRCHK_ALWAYS( */
-    /* std::abs(muscle.getMuscleDynamicsInfo(state).fiberForce - fiberForce) < 1e-10, */
-    /*         "calcMuscleStateInfo", */
-    /*         "Muscle fiber force result must match"); */
 
     fiberForceAlongTendon = fiberForce * cosPennationAngle;
 
     tendonForce = fiberForceAlongTendon;
-
-    /* std::cout << "muscle-tendon force = "<< tendonForce << */
-    /*     " or " << muscle.getMuscleDynamicsInfo(state).tendonForce << */
-    /*     " or fiberForce " << muscle.getMuscleDynamicsInfo(state).fiberForceAlongTendon << */
-    /*     " or fiberForce " << muscle.getMuscleDynamicsInfo(state).fiberForce */
-    /*     << std::endl; */
-    /* std::cout << std::endl; */
-
-    /* SimTK_ERRCHK_ALWAYS(!std::isnan(fiberForce), */
-    /*         "calcMuscleStateInfo", */
-    /*         "Fiber force is NaN."); */
-    /* tendonForce = calcTendonForce(muscle, state); */
 }
 
 double Millard2012EquilibriumMuscle::MuscleStateInfo::calcFiberLength(
