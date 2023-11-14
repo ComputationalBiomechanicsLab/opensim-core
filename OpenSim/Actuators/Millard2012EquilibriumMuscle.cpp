@@ -442,6 +442,11 @@ getPassiveFiberDampingForceAlongTendon(const SimTK::State& s) const
            getMuscleLengthInfo(s).cosPennationAngle;
 }
 
+double Millard2012EquilibriumMuscle::
+getSpeed(const SimTK::State& s) const
+{
+    return getLengtheningSpeed(s);
+}
 
 //==============================================================================
 // SET METHODS

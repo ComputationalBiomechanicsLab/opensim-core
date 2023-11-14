@@ -444,6 +444,8 @@ public:
     void computeFiberEquilibrium(SimTK::State& s, 
                                  bool solveForVelocity = false) const;
 
+    virtual double getSpeed( const SimTK::State& s) const override;
+
 //==============================================================================
 // DEPRECATED
 //==============================================================================
