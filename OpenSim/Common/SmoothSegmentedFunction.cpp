@@ -582,7 +582,8 @@ If x is in the linear region
 ________________________________________________________________________
     */
 
-double SmoothSegmentedFunction::calcDerivative(double x, int order) const
+namespace {
+SimTK::Vec6 calcSelectedDerivatives(double x, bool (&orders)[6], const std::shared_ptr<const SmoothSegmentedFunctionData> _smoothData)
 {
     const double x0 = _smoothData->_x0;
     const double x1 = _smoothData->_x1;
@@ -590,11 +591,14 @@ double SmoothSegmentedFunction::calcDerivative(double x, int order) const
     if (x < x0) {
         const double y0 = _smoothData->_y0;
         const double dydx0 = _smoothData->_dydx0;
-        switch (order) {
-            case 0: return y0 + dydx0*(x-x0);
-            case 1: return dydx0;
-            default: return 0.;
-        }
+        return {
+         y0 + dydx0*(x-x0),
+            dydx0,
+            0.,
+            0.,
+            0.,
+            0.
+        };
     }
 
     if (x <= x1) {
@@ -611,25 +615,42 @@ double SmoothSegmentedFunction::calcDerivative(double x, int order) const
                 MAXITER);
 
         const SimTK::Array_<SimTK::Vec6>& ctrlPtsY = _smoothData->_ctrlPtsY;
-        return SegmentedQuinticBezierToolkit::calcQuinticBezierCurveDerivDYDX(
-                u,
-                ctrlPtsX[idx],
-                ctrlPtsY[idx],
-                order);
+        SimTK::Vec6 y {SimTK::NaN};
+        for (int i = 0; i < 6; ++i) {
+            if (orders[i]) {
+                y[i] = SegmentedQuinticBezierToolkit::calcQuinticBezierCurveDerivDYDX(
+                        u,
+                        ctrlPtsX[idx],
+                        ctrlPtsY[idx],
+                        i);
+            }
+        }
+        return y;
     }
 
     if (x > x1) {
         const double y1 = _smoothData->_y1;
         const double dydx1 = _smoothData->_dydx1;
-        switch (order) {
-            case 0: return y1 + dydx1*(x-x1);
-            case 1: return dydx1;
-            default: return 0.;
-        }
+        return {
+         y1 + dydx1*(x-x1),
+            dydx1,
+            0.,
+            0.,
+            0.,
+            0.
+        };
     }
 
     // In case of NaN return NaN.
-    return SimTK::NaN;
+    return SimTK::Vec6{SimTK::NaN};
+}
+}
+
+double SmoothSegmentedFunction::calcDerivative(double x, int order) const
+{
+    bool orders[6] = {false};
+    orders[order]=true;
+    return calcSelectedDerivatives(x, orders, _smoothData)[order];
 }
 
 double SmoothSegmentedFunction::
