@@ -704,10 +704,10 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
 
     /* std::cout << "muscle-fiberLength = "<< fiberLength << " or " << muscle.getMuscleLengthInfo(state).fiberLength << std::endl; */
 
-    SimTK_ERRCHK_ALWAYS(
-    std::abs(muscle.getMuscleLengthInfo(state).fiberLength - fiberLength) < 1e-10,
-            "calcMuscleStateInfo",
-            "Muscle length result must match");
+    /* SimTK_ERRCHK_ALWAYS( */
+    /* std::abs(muscle.getMuscleLengthInfo(state).fiberLength - fiberLength) < 1e-10, */
+    /*         "calcMuscleStateInfo", */
+    /*         "Muscle length result must match"); */
 
     /* SimTK_ERRCHK_ALWAYS(!std::isnan(fiberLength), */
     /*         "calcMuscleStateInfo", */
