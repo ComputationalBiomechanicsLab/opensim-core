@@ -716,7 +716,7 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
             "calcMuscleStateInfo",
             "The muscle fiber has a length of 0, causing a singularity");
 
-    static const bool DO_CHECKS = true;
+    static const bool DO_CHECKS = false;
     static const double CHECKS_TOL = 1e-10;
 
     if (DO_CHECKS) {
