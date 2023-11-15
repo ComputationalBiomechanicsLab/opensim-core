@@ -716,8 +716,19 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
             "calcMuscleStateInfo",
             "The muscle fiber has a length of 0, causing a singularity");
 
+    static const bool DO_CHECKS = true;
+    static const double CHECKS_TOL = 1e-10;
+
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(fiberLength, muscle.getMuscleLengthInfo(state).fiberLength, CHECKS_TOL);
+    }
+
     pennationAngle    = penModel.calcPennationAngle(fiberLength);
     cosPennationAngle = cos(pennationAngle);
+
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(cosPennationAngle, muscle.getMuscleLengthInfo(state).cosPennationAngle, CHECKS_TOL);
+    }
 
     SimTK_ERRCHK_ALWAYS(cosPennationAngle > SimTK::SignificantReal,
             "calcMuscleStateInfo",
@@ -728,6 +739,9 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
             fiberLength,
             muscleLength);
     normTendonLength  = tendonLength / tendonSlackLength;
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(normTendonLength, muscle.getMuscleLengthInfo(state).normTendonLength, CHECKS_TOL);
+    }
 
     // Muscle velocity.
     std::pair<double, double> vAndFv = calcNormFiberVelocityAndMultiplier(muscle, state);
@@ -745,10 +759,26 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
         fiberVelocity = normFiberVelocity * maxContractionVelocity * optimalFiberLength;
     }
 
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(fiberVelocity, muscle.getFiberVelocityInfo(state).fiberVelocity, CHECKS_TOL);
+    }
+
     // Muscle dynamics.
     fiberForce = calcFiberForce(muscle, state);
 
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(fiberForce, muscle.getMuscleDynamicsInfo(state).fiberForce, CHECKS_TOL);
+    }
+
     fiberForceAlongTendon = fiberForce * cosPennationAngle;
+
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(activation, muscle.getMuscleDynamicsInfo(state).activation, CHECKS_TOL);
+    }
+
+    if (DO_CHECKS) {
+        SimTK_TEST_EQ_TOL(fiberForceAlongTendon, muscle.getMuscleDynamicsInfo(state).fiberForceAlongTendon, CHECKS_TOL);
+    }
 
     tendonForce = fiberForceAlongTendon;
 }
