@@ -813,13 +813,13 @@ private:
         double fiberActiveForceLengthMultiplierDerivative  { SimTK::NaN};
 
         // From dynamics info.
-        double fiberForce            { SimTK::NaN};
-        double fiberForceAlongTendon { SimTK::NaN};
+        /* double fiberForce            { SimTK::NaN}; */
+        /* double fiberForceAlongTendon { SimTK::NaN}; */
 
         double tendonForce                           { SimTK::NaN};
-        double normTendonForce                       { SimTK::NaN};
-        double tendonForceLengthMultiplier           { SimTK::NaN};
-        double tendonForceLengthMultiplierDerivative { SimTK::NaN};
+        /* double normTendonForce                       { SimTK::NaN}; */
+        /* double tendonForceLengthMultiplier           { SimTK::NaN}; */
+        /* double tendonForceLengthMultiplierDerivative { SimTK::NaN}; */
 
         void calculate(
                 const Millard2012EquilibriumMuscle& muscle,

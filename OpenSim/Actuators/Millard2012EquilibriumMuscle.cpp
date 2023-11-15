@@ -744,13 +744,72 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     }
 
     // Muscle velocity.
-    std::pair<double, double> vAndFv = calcNormFiberVelocityAndMultiplier(muscle, state);
-    normFiberVelocity = vAndFv.first;
-    fiberForceVelocityMultiplier = vAndFv.second;
+    if (muscle.get_ignore_tendon_compliance()) {
+        // If the tendon is buckling, fiber velocity remains zero.
+        bool buckling = tendonLength < tendonSlackLength - SimTK::SignificantReal;
+        if (buckling) {
+            normFiberVelocity = 0.;
+            fiberForceVelocityMultiplier = 1.;
+        }
+        // TODO store this?
+        double muscleLengtheningSpeed   = muscle.getLengtheningSpeed(state);
 
-    // TODO make more efficient....
+        fiberVelocity = muscle.getPennationModel().calcFiberVelocity(cosPennationAngle, muscleLengtheningSpeed, 0.);
+        normFiberVelocity = fiberVelocity/maxContractionVelocity/optimalFiberLength;
+        fiberForceVelocityMultiplier = muscle.get_ForceVelocityCurve().calcValue(normFiberVelocity);
+    } else {
+        const TendonForceLengthCurve& fseCurve =
+            muscle.get_TendonForceLengthCurve();
+        double normTendonForce = fseCurve.calcValue(normTendonLength);
+        tendonForce = normTendonForce * maxIsometricForce;
+
+        // *************************************
+        // ****** Equilibrium State Info *******
+        // *************************************
+        if (!muscle.use_fiber_damping) {
+            SimTK_ERRCHK_ALWAYS(cosPennationAngle > SimTK::SignificantReal,
+                    "calcFiberVelocityInfo",
+                    "%s: Pennation angle is 90 degrees, causing a singularity");
+            SimTK_ERRCHK_ALWAYS(activation > SimTK::SignificantReal,
+                    "calcFiberVelocityInfo",
+                    "%s: Activation is 0, causing a singularity");
+            SimTK_ERRCHK_ALWAYS(fiberActiveForceLengthMultiplier >
+                    SimTK::SignificantReal,
+                    "calcFiberVelocityInfo",
+                    "%s: Active-force-length factor is 0, causing a singularity");
+
+            fiberForceVelocityMultiplier = muscle.calcFv(activation, fiberActiveForceLengthMultiplier,
+                    fiberPassiveForceLengthMultiplier, normTendonForce,
+                    cosPennationAngle);
+
+            // Evaluate the inverse force-velocity curve.
+            normFiberVelocity = muscle.fvInvCurve.calcValue(fiberForceVelocityMultiplier);
+            fiberVelocity = normFiberVelocity * maxContractionVelocity * optimalFiberLength;
+        } else {
+
+            // ********************************************
+            // ****** Damped Equilibrium State Info *******
+            // ********************************************
+            SimTK_ERRCHK_ALWAYS(fiberDamping > SimTK::SignificantReal,
+                    "calcFiberVelocityInfo",
+                    "Fiber damping coefficient must be greater than 0.");
+
+            // Newton solve for fiber velocity.
+            SimTK::Vec4 fiberVelocityV = muscle.calcDampedNormFiberVelocity(
+                    maxIsometricForce, activation, fiberActiveForceLengthMultiplier,
+                    fiberPassiveForceLengthMultiplier, normTendonForce, fiberDamping,
+                    cosPennationAngle);
+
+            // If the Newton method converged, update the fiber velocity.
+            bool newton_method_converged = fiberVelocityV[2] > 0.5;
+            SimTK_ASSERT(newton_method_converged, "Invalid Fiber velocity: Newton method did not converge");
+            normFiberVelocity = fiberVelocityV[0];
+            fiberVelocity = normFiberVelocity * maxContractionVelocity * optimalFiberLength;
+            fiberForceVelocityMultiplier = fiberVelocityV[3];
+        }
+    }
+
     isFiberStateClamped = muscle.isFiberStateClamped(fiberLength,fiberVelocity);
-
     if (isFiberStateClamped) {
         normFiberVelocity = 0.;
         fiberVelocity = 0.;
@@ -764,23 +823,19 @@ void Millard2012EquilibriumMuscle::MuscleStateInfo::calculate(
     }
 
     // Muscle dynamics.
-    fiberForce = calcFiberForce(muscle, state);
-
-    if (DO_CHECKS) {
-        SimTK_TEST_EQ_TOL(fiberForce, muscle.getMuscleDynamicsInfo(state).fiberForce, CHECKS_TOL);
-    }
-
-    fiberForceAlongTendon = fiberForce * cosPennationAngle;
-
-    if (DO_CHECKS) {
-        SimTK_TEST_EQ_TOL(activation, muscle.getMuscleDynamicsInfo(state).activation, CHECKS_TOL);
+    if (muscle.get_ignore_tendon_compliance()) {
+        double fiberForce = calcFiberForce(muscle, state);
+        double fiberForceAlongTendon = fiberForce * cosPennationAngle;
+        if (DO_CHECKS) {
+            SimTK_TEST_EQ_TOL(fiberForceAlongTendon, muscle.getMuscleDynamicsInfo(state).fiberForceAlongTendon, CHECKS_TOL);
+        }
+        tendonForce = fiberForceAlongTendon;
     }
 
     if (DO_CHECKS) {
-        SimTK_TEST_EQ_TOL(fiberForceAlongTendon, muscle.getMuscleDynamicsInfo(state).fiberForceAlongTendon, CHECKS_TOL);
+        SimTK_TEST_EQ_TOL(tendonForce, muscle.getMuscleDynamicsInfo(state).tendonForce, CHECKS_TOL);
     }
 
-    tendonForce = fiberForceAlongTendon;
 }
 
 double Millard2012EquilibriumMuscle::MuscleStateInfo::calcFiberLength(
