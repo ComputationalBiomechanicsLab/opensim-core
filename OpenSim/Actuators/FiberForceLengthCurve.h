@@ -296,6 +296,11 @@ public:
     double calcDerivative(const std::vector<int>& derivComponents,
                           const SimTK::Vector& x) const override;
 
+    /** Returns the same as calcValue and calcDerivative(_, 1), but more
+    efficient than calling them separately. */
+    SmoothSegmentedFunction::ValueAndDerivative
+        calcValueAndDerivative(double normFiberLength) const;
+
     /** Calculates the normalized area under the curve. Since it is expensive to
     construct, the curve is built only when necessary.
     @param normFiberLength

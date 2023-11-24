@@ -322,6 +322,11 @@ public:
     double calcDerivative(const std::vector<int>& derivComponents,
                           const SimTK::Vector& x) const override;
 
+    /** Returns the same as calcValue and calcDerivative(_, 1), but more
+    efficient than calling them separately. */
+    SmoothSegmentedFunction::ValueAndDerivative
+        calcValueAndDerivative(double normFiberVelocity) const;
+
     /** Returns a SimTK::Vec2 containing the lower (0th element) and upper (1st
     element) bounds on the domain of the curve. Outside this domain, the curve
     is approximated using linear extrapolation.

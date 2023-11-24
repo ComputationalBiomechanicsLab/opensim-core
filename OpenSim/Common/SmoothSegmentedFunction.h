@@ -144,8 +144,8 @@ namespace OpenSim {
            double derivative;
        };
 
-       /// Returns the same as calcValue(x) and calcDerivative(x, 1), but more
-       // efficient than calling them separately.
+       /* Returns the same as calcValue(x) and calcDerivative(x, 1), but more
+       efficient than calling them separately. */
        ValueAndDerivative calcValueAndFirstDerivative(double x) const;
 
 #ifndef SWIG
