@@ -497,8 +497,8 @@ void ActivationFiberLengthMuscle_Deprecated::calcMuscleLengthInfo(const SimTK::S
     mli.normTendonLength = norm_muscle_tendon_length - mli.normFiberLength * mli.cosPennationAngle;
     mli.tendonStrain = (mli.tendonLength/getTendonSlackLength()-1.0);
 
-    mli.fiberActiveForceLengthMultiplier = calcActiveForce(s, mli.normFiberLength);
-    mli.fiberPassiveForceLengthMultiplier = calcPassiveForce(s, mli.normFiberLength);
+    mli.fiberActiveForceLengthCurveEval.value = calcActiveForce(s, mli.normFiberLength);
+    mli.fiberPassiveForceLengthCurveEval.value = calcPassiveForce(s, mli.normFiberLength);
 }
 
 /* calculate muscle's velocity related values such fiber and tendon velocities,
@@ -519,7 +519,7 @@ void ActivationFiberLengthMuscle_Deprecated::calcMuscleDynamicsInfo(const SimTK:
     double tendonForce = getActuation(s);
     mdi.normTendonForce = tendonForce/maxIsometricForce;
     
-    mdi.passiveFiberForce = mli.fiberPassiveForceLengthMultiplier * maxIsometricForce;
+    mdi.passiveFiberForce = mli.fiberPassiveForceLengthCurveEval.value * maxIsometricForce;
     
     mdi.activation = getStateVariableValue(s, STATE_ACTIVATION_NAME);
 

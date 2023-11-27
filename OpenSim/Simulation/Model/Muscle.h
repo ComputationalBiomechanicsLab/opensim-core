@@ -25,6 +25,7 @@
 
 
 // INCLUDE
+#include "OpenSim/Common/SmoothSegmentedFunction.h"
 #include "PathActuator.h"
 
 #ifdef SWIG
@@ -504,6 +505,16 @@ protected:
         be calculated. */
     double _muscleWidth;
 
+    struct CurveValueAndDerivative {
+
+        CurveValueAndDerivative(SmoothSegmentedFunction::ValueAndDerivative other) :
+            value{other.value},
+            derivative{other.derivative} {}
+
+        double value;
+        double derivative;
+    };
+
  /**
     The MuscleLengthInfo struct contains information about the muscle that is
     strictly a function of the length of the fiber and the tendon, and the 
@@ -592,7 +603,7 @@ protected:
         - use as necessary.
        
     */
-    struct MuscleLengthInfo
+    struct MuscleLengthInfo final
     {                                  // DIMENSION         Units
         double fiberLength;            // length            m
         double fiberLengthAlongTendon; // length            m
@@ -606,11 +617,8 @@ protected:
         double cosPennationAngle;      // NA                NA
         double sinPennationAngle;      // NA                NA
 
-        double fiberPassiveForceLengthMultiplier; // NA     NA
-        double fiberActiveForceLengthMultiplier;  // NA     NA
-
-        double fiberPassiveForceLengthGradient;   // 1/length     1/m
-        double fiberActiveForceLengthGradient;    // 1/length     1/m
+        CurveValueAndDerivative fiberPassiveForceLengthCurveEval;
+        CurveValueAndDerivative fiberActiveForceLengthCurveEval;
 
         SimTK::Vector userDefinedLengthExtras;    // NA     NA
 
@@ -620,12 +628,11 @@ protected:
             normTendonLength(SimTK::NaN), tendonStrain(SimTK::NaN),
             pennationAngle(SimTK::NaN), cosPennationAngle(SimTK::NaN),
             sinPennationAngle(SimTK::NaN),
-            fiberPassiveForceLengthMultiplier(SimTK::NaN),
-            fiberActiveForceLengthMultiplier(SimTK::NaN),
-            fiberPassiveForceLengthGradient(SimTK::NaN),
-            fiberActiveForceLengthGradient(SimTK::NaN),
+            fiberPassiveForceLengthCurveEval({SimTK::NaN, SimTK::NaN}),
+            fiberActiveForceLengthCurveEval({SimTK::NaN, SimTK::NaN}),
             userDefinedLengthExtras(0, SimTK::NaN)
         {}
+
         friend std::ostream& operator<<(
             std::ostream& o,
             const MuscleLengthInfo& mli)

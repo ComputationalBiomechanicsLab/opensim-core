@@ -792,12 +792,8 @@ void Millard2012AccelerationMuscle::
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength -  1.0;
 
-        SmoothSegmentedFunction::ValueAndDerivative falEval = falCurve.calcValueAndDerivative(mli.normFiberLength);
-        mli.fiberActiveForceLengthMultiplier = falEval.value;
-        mli.fiberActiveForceLengthGradient =falEval.derivative;
-        SmoothSegmentedFunction::ValueAndDerivative fpeEval = fpeCurve.calcValueAndDerivative(mli.normFiberLength);
-        mli.fiberPassiveForceLengthMultiplier= fpeEval.value;
-        mli.fiberPassiveForceLengthGradient =fpeEval.derivative;
+        mli.fiberActiveForceLengthCurveEval = falCurve.calcValueAndDerivative(mli.normFiberLength);
+        mli.fiberPassiveForceLengthCurveEval = fpeCurve.calcValueAndDerivative(mli.normFiberLength);
 
         double tendonForceLengthMultiplier=fseCurve.calcValue(mli.normTendonLength);
 
@@ -1014,10 +1010,10 @@ void Millard2012AccelerationMuscle::
         double dtl_dt   = mvi.tendonVelocity;
         // double tlN      = mli.normTendonLength;
    
-        double fal  = mli.fiberActiveForceLengthMultiplier;
-        double dfal_dlceN  = mli.fiberActiveForceLengthGradient;
-        double fpe  = mli.fiberPassiveForceLengthMultiplier;
-        double dfpe_dlceN  = mli.fiberPassiveForceLengthGradient;
+        double fal  = mli.fiberActiveForceLengthCurveEval.value;
+        double dfal_dlceN  = mli.fiberActiveForceLengthCurveEval.derivative;
+        double fpe  = mli.fiberPassiveForceLengthCurveEval.value;
+        double dfpe_dlceN  = mli.fiberPassiveForceLengthCurveEval.derivative;
         double fv   = mvi.fiberForceVelocityMultiplier;    
         double fse  = mli.userDefinedLengthExtras[MLIfse];
         double fk   = mli.userDefinedLengthExtras[MLIfk];

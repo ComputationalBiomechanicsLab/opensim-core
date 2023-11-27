@@ -357,13 +357,13 @@ double Muscle::getMusclePotentialEnergy(const SimTK::State& s) const
 /* get the passive fiber (parallel elastic element) force multiplier */
 double Muscle::getPassiveForceMultiplier(const SimTK::State& s) const
 {
-    return getMuscleLengthInfo(s).fiberPassiveForceLengthMultiplier;
+    return getMuscleLengthInfo(s).fiberPassiveForceLengthCurveEval.value;
 }
 
 /* get the active fiber (contractile element) force multiplier due to current fiber length */
 double Muscle::getActiveForceLengthMultiplier(const SimTK::State& s) const
 {
-    return getMuscleLengthInfo(s).fiberActiveForceLengthMultiplier;
+    return getMuscleLengthInfo(s).fiberActiveForceLengthCurveEval.value;
 }
 
 /* get current fiber velocity (m/s) positive is lengthening */
@@ -638,7 +638,7 @@ double Muscle::calcInextensibleTendonActiveFiberForce(SimTK::State& s,
     const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
     const FiberVelocityInfo& fvi = getFiberVelocityInfo(s);
     return getMaxIsometricForce()*activation*
-        mli.fiberActiveForceLengthMultiplier*fvi.fiberForceVelocityMultiplier
+        mli.fiberActiveForceLengthCurveEval.value*fvi.fiberForceVelocityMultiplier
         *mli.cosPennationAngle;
 }
 

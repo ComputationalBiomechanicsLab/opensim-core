@@ -231,18 +231,17 @@ public:
         mli.pennationAngle         = 0;
         mli.cosPennationAngle      = 1;
         mli.sinPennationAngle      = 0;
-        mli.fiberPassiveForceLengthMultiplier = 0;
 
         // The fiberActiveForceLengthMultiplier (referred to as 'Fisom' in [3])
         // is the proportion of maxIsometricForce that would be delivered
         // isometrically at maximal activation. Fisom=1 if Lce=Lceopt.
         if (mli.fiberLength < (1 - get_width()) * getOptimalFiberLength() ||
             mli.fiberLength > (1 + get_width()) * getOptimalFiberLength())
-            mli.fiberActiveForceLengthMultiplier = 0;
+            mli.fiberActiveForceLengthCurveEval.value = 0.;
         else {
             double c  = -1.0 / (get_width() * get_width());
             double t1 = mli.fiberLength / getOptimalFiberLength();
-            mli.fiberActiveForceLengthMultiplier = c*t1*(t1-2) + c + 1;
+            mli.fiberActiveForceLengthCurveEval.value = c*t1*(t1-2) + c + 1;
         }
     }
 

@@ -835,15 +835,8 @@ void Millard2012EquilibriumMuscle::calcMuscleLengthInfo(const SimTK::State& s,
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength - 1.0;
 
-        SmoothSegmentedFunction::ValueAndDerivative fpeEval =
-            fpeCurve.calcValueAndDerivative(mli.normFiberLength);
-        mli.fiberPassiveForceLengthMultiplier = fpeEval.value;
-        mli.fiberPassiveForceLengthGradient   = fpeEval.derivative;
-
-        SmoothSegmentedFunction::ValueAndDerivative falEval =
-            falCurve.calcValueAndDerivative(mli.normFiberLength);
-        mli.fiberActiveForceLengthMultiplier = falEval.value;
-        mli.fiberActiveForceLengthGradient   = falEval.derivative;
+        mli.fiberPassiveForceLengthCurveEval = fpeCurve.calcValueAndDerivative(mli.normFiberLength);
+        mli.fiberActiveForceLengthCurveEval = falCurve.calcValueAndDerivative(mli.normFiberLength);
 
     } catch(const std::exception &x) {
         std::string msg = "Exception caught in Millard2012EquilibriumMuscle::"
@@ -968,15 +961,15 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
             SimTK_ERRCHK_ALWAYS(a > SimTK::SignificantReal,
                 "calcFiberVelocityInfo",
                 "%s: Activation is 0, causing a singularity");
-            SimTK_ERRCHK_ALWAYS(mli.fiberActiveForceLengthMultiplier >
+            SimTK_ERRCHK_ALWAYS(mli.fiberActiveForceLengthCurveEval.value >
                                 SimTK::SignificantReal,
                 "calcFiberVelocityInfo",
                 "%s: Active-force-length factor is 0, causing a singularity");
 
             fv = calcUndampedFiberForceVelocityMultiplier(
                 a,
-                mli.fiberActiveForceLengthMultiplier,
-                mli.fiberPassiveForceLengthMultiplier,
+                mli.fiberActiveForceLengthCurveEval.value,
+                mli.fiberPassiveForceLengthCurveEval.value,
                 fse,
                 mli.cosPennationAngle);
 
@@ -1008,8 +1001,8 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
                 calcDampedNormFiberVelocity(
                     getMaxIsometricForce(),
                     a,
-                    mli.fiberActiveForceLengthMultiplier,
-                    mli.fiberPassiveForceLengthMultiplier,
+                    mli.fiberActiveForceLengthCurveEval.value,
+                    mli.fiberPassiveForceLengthCurveEval.value,
                     fse,
                     beta,
                     mli.cosPennationAngle,
@@ -1132,11 +1125,11 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
             aFm = calcFiberForceActive(
                 fiso,
                 a,
-                mli.fiberActiveForceLengthMultiplier,
+                mli.fiberActiveForceLengthCurveEval.value,
                 mvi.fiberForceVelocityMultiplier);
             p1Fm = calcFiberForcePassiveElastic(
                 fiso,
-                mli.fiberPassiveForceLengthMultiplier);
+                mli.fiberPassiveForceLengthCurveEval.value);
             p2Fm =
                 calcFiberForcePassiveDamping(fiso, mvi.normFiberVelocity, beta);
             pFm  = p1Fm + p2Fm;
@@ -1163,8 +1156,8 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
                 a,
                 mvi.fiberForceVelocityMultiplier,
                 optFiberLen,
-                mli.fiberActiveForceLengthGradient,
-                mli.fiberPassiveForceLengthGradient);
+                mli.fiberActiveForceLengthCurveEval.derivative,
+                mli.fiberPassiveForceLengthCurveEval.derivative);
             const double dFmAT_dlce = calc_DFiberForceAT_DFiberLength(
                 fm,
                 dFm_dlce,

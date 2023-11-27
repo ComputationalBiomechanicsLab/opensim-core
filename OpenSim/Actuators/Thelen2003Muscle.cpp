@@ -407,11 +407,11 @@ void Thelen2003Muscle::calcMuscleLengthInfo(const SimTK::State& s,
         
 
     
-        mli.fiberPassiveForceLengthMultiplier= calcfpe(mli.normFiberLength);
-        mli.fiberPassiveForceLengthGradient= calcDfpeDlceN(mli.normFiberLength);
+        mli.fiberPassiveForceLengthCurveEval.value = calcfpe(mli.normFiberLength);
+        mli.fiberPassiveForceLengthCurveEval.derivative = calcDfpeDlceN(mli.normFiberLength);
 
-        mli.fiberActiveForceLengthMultiplier = calcfal(mli.normFiberLength);
-        mli.fiberActiveForceLengthGradient = calcDfalDlceN(mli.normFiberLength);
+        mli.fiberActiveForceLengthCurveEval.value= calcfal(mli.normFiberLength);
+        mli.fiberActiveForceLengthCurveEval.derivative= calcDfalDlceN(mli.normFiberLength);
     }catch(const std::exception &x){
         std::string msg = "Exception caught in Thelen2003Muscle::" 
                           "calcMuscleLengthInfo\n"                 
@@ -504,8 +504,8 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         //to its minimum allowable value.
 
         double fse  = calcfse(tl/tendonSlackLen);    
-        double fal  = mli.fiberActiveForceLengthMultiplier;
-        double fpe  = mli.fiberPassiveForceLengthMultiplier;
+        double fal  = mli.fiberActiveForceLengthCurveEval.value;
+        double fpe  = mli.fiberPassiveForceLengthCurveEval.value;
 
         double afalfv = ((fse/cosphi)-fpe); //we can do this without fear of
                                               //a singularity because fiber length
@@ -602,10 +602,10 @@ void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s,
 
         //These quantities should already be set to legal values from
         //calcFiberVelocityInfo
-        double fal        = mli.fiberActiveForceLengthMultiplier;
-        double dfal_dlceN = mli.fiberActiveForceLengthGradient;
-        double fpe        = mli.fiberPassiveForceLengthMultiplier;
-        double dfpe_dlceN = mli.fiberActiveForceLengthGradient;
+        double fal        = mli.fiberActiveForceLengthCurveEval.value;
+        double dfal_dlceN = mli.fiberActiveForceLengthCurveEval.derivative;
+        double fpe        = mli.fiberPassiveForceLengthCurveEval.value;
+        double dfpe_dlceN = mli.fiberPassiveForceLengthCurveEval.derivative;
 
         double fv   = mvi.fiberForceVelocityMultiplier;
         double fse  = mvi.userDefinedVelocityExtras[0];

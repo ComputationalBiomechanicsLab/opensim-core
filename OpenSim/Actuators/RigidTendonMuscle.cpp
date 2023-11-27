@@ -139,9 +139,9 @@ calcMuscleLengthInfo(const State& s, MuscleLengthInfo& mli) const
     mli.normFiberLength = mli.fiberLength/getOptimalFiberLength();
 
     const Vector arg(1, mli.normFiberLength);
-    mli.fiberActiveForceLengthMultiplier = 
+    mli.fiberActiveForceLengthCurveEval.value =
         get_active_force_length_curve().calcValue(arg);
-    mli.fiberPassiveForceLengthMultiplier = 
+    mli.fiberPassiveForceLengthCurveEval.value =
         SimTK::clamp(0, get_passive_force_length_curve().calcValue(arg), 10);
 
     mli.normTendonLength = 1.0;
@@ -178,16 +178,16 @@ calcMuscleDynamicsInfo(const State& s, MuscleDynamicsInfo& mdi) const
 
     mdi.activation = getControl(s);
     double normActiveForce = mdi.activation 
-                             * mli.fiberActiveForceLengthMultiplier 
+                             * mli.fiberActiveForceLengthCurveEval.value
                              * fvi.fiberForceVelocityMultiplier;
     mdi.activeFiberForce =  getMaxIsometricForce()*normActiveForce;
     mdi.passiveFiberForce = getMaxIsometricForce()
-                            * mli.fiberPassiveForceLengthMultiplier;
+                            * mli.fiberPassiveForceLengthCurveEval.value;
     mdi.fiberForce = mdi.activeFiberForce + mdi.passiveFiberForce;
     mdi.fiberForceAlongTendon = mdi.fiberForce*mli.cosPennationAngle;
     mdi.tendonForce = mdi.fiberForceAlongTendon;
 
-    mdi.normTendonForce = (normActiveForce+mli.fiberPassiveForceLengthMultiplier)
+    mdi.normTendonForce = (normActiveForce+mli.fiberPassiveForceLengthCurveEval.value)
                           * mli.cosPennationAngle;
 
     mdi.fiberActivePower = -(mdi.activeFiberForce) * fvi.fiberVelocity;
