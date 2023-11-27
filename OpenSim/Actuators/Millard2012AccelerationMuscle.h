@@ -966,7 +966,9 @@ private:
                                              double fpe,
                                              double fk,
                                              double fcphi,
-                                             double fse) const;
+                                             double fse,
+                                             double dfal_dlceN,
+                                             double dfpe_dlceN) const;
 
     struct AccelerationMuscleInfo {   
         //Kinematic Quantities

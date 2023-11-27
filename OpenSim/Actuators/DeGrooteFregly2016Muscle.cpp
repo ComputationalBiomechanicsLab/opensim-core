@@ -292,8 +292,12 @@ void DeGrooteFregly2016Muscle::calcMuscleLengthInfoHelper(
     // ------------
     mli.fiberPassiveForceLengthMultiplier =
             calcPassiveForceMultiplier(mli.normFiberLength);
+    mli.fiberPassiveForceLengthGradient =
+        calcPassiveForceMultiplierDerivative(mli.normFiberLength);
     mli.fiberActiveForceLengthMultiplier =
             calcActiveForceLengthMultiplier(mli.normFiberLength);
+    mli.fiberActiveForceLengthGradient =
+        calcActiveForceLengthMultiplierDerivative(mli.normFiberLength);
 }
 
 void DeGrooteFregly2016Muscle::calcFiberVelocityInfoHelper(
@@ -395,8 +399,7 @@ void DeGrooteFregly2016Muscle::calcMuscleDynamicsInfoHelper(
 
     // Compute stiffness entries.
     // --------------------------
-    mdi.fiberStiffness = calcFiberStiffness(mdi.activation, mli.normFiberLength,
-            fvi.fiberForceVelocityMultiplier);
+    mdi.fiberStiffness = HillTypeMuscle::calcFiberStiffness(getMaxIsometricForce(), mdi.activation, fvi.fiberForceVelocityMultiplier, getOptimalFiberLength(), mli.fiberActiveForceLengthGradient, mli.fiberPassiveForceLengthGradient);
     const auto& partialPennationAnglePartialFiberLength =
             calcPartialPennationAnglePartialFiberLength(mli.fiberLength);
     const auto& partialFiberForceAlongTendonPartialFiberLength =

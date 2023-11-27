@@ -408,7 +408,10 @@ void Thelen2003Muscle::calcMuscleLengthInfo(const SimTK::State& s,
 
     
         mli.fiberPassiveForceLengthMultiplier= calcfpe(mli.normFiberLength);
+        mli.fiberPassiveForceLengthGradient= calcDfpeDlceN(mli.normFiberLength);
+
         mli.fiberActiveForceLengthMultiplier = calcfal(mli.normFiberLength);
+        mli.fiberActiveForceLengthGradient = calcDfalDlceN(mli.normFiberLength);
     }catch(const std::exception &x){
         std::string msg = "Exception caught in Thelen2003Muscle::" 
                           "calcMuscleLengthInfo\n"                 
@@ -599,8 +602,11 @@ void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s,
 
         //These quantities should already be set to legal values from
         //calcFiberVelocityInfo
-        double fal  = mli.fiberActiveForceLengthMultiplier;
-        double fpe  = mli.fiberPassiveForceLengthMultiplier;
+        double fal        = mli.fiberActiveForceLengthMultiplier;
+        double dfal_dlceN = mli.fiberActiveForceLengthGradient;
+        double fpe        = mli.fiberPassiveForceLengthMultiplier;
+        double dfpe_dlceN = mli.fiberActiveForceLengthGradient;
+
         double fv   = mvi.fiberForceVelocityMultiplier;
         double fse  = mvi.userDefinedVelocityExtras[0];
     
@@ -615,7 +621,7 @@ void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s,
         if(fiberStateClamped < 0.5){        
             aFm          = calcActiveFm(a,fal,fv,fiso);
             Fm           = calcFm(a,fal,fv,fpe,fiso);
-            dFm_dlce     = calcDFmDlce(lce,a,fv,fiso,optFiberLen);
+            dFm_dlce     = HillTypeMuscle::calcFiberStiffness(fiso, a, fv, optFiberLen, dfal_dlceN, dfpe_dlceN);
             dFmAT_dlce   = calcDFmATDlce(lce,phi,cosphi,Fm,dFm_dlce,penHeight);
 
             //The expression below is correct only because we are using a pennation
@@ -810,7 +816,10 @@ Thelen2003Muscle::initMuscleState(const SimTK::State& s,
 
     // Functional to compute the partial derivative of muscle force w.r.t. lce
     auto partialsFunc = [&] {
-        dFm_dlce = calcDFmDlce(lce, ma, fv, fiso, ofl);
+
+        double dfal_dlceN = calcDfalDlceN(lceN);
+        double dfpe_dlceN = calcDfpeDlceN(lceN);
+        dFm_dlce = HillTypeMuscle::calcFiberStiffness(fiso, ma, fv, ofl, dfal_dlceN, dfpe_dlceN);
         dFmAT_dlce = calcDFmATDlce(lce, phi, cosphi, Fm, dFm_dlce, vol);
         dFmAT_dlceAT = dFmAT_dlce*cosphi;
 
@@ -1005,19 +1014,6 @@ double Thelen2003Muscle::calcActiveFm(double ma, double fal, double fv,
 {
     double aFm = (ma*fal*fv)*fiso;
     return aFm;
-}
-
-double Thelen2003Muscle::calcDFmDlce(double lce, double ma, double fv, 
-                                      double fiso, double ofl) const
-{
-
-            double lceN = lce/ofl;
-            double dfal_d_lceN = calcDfalDlceN(lceN);
-            double dfpe_d_lceN = calcDfpeDlceN(lceN);
-
-            double dFm_d_lce = ((ma*fv)*dfal_d_lceN + dfpe_d_lceN)*fiso
-                              *(1/ofl);                   
-            return dFm_d_lce;
 }
 
 double Thelen2003Muscle::calcDFmATDlce(double lce, double phi, double cosphi, 

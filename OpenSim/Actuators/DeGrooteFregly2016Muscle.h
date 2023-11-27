@@ -566,30 +566,6 @@ public:
                           nonConPassiveFiberForce;
     }
 
-    /// The stiffness of the fiber in the direction of the fiber. This includes
-    /// both active and passive force contributions to stiffness from the muscle
-    /// fiber.
-    /// @note based on Millard2012EquilibriumMuscle::calcFiberStiffness().
-    SimTK::Real calcFiberStiffness(const SimTK::Real& activation,
-            const SimTK::Real& normFiberLength,
-            const SimTK::Real& fiberVelocityMultiplier) const {
-
-        const SimTK::Real partialNormFiberLengthPartialFiberLength =
-                1.0 / get_optimal_fiber_length();
-        const SimTK::Real partialNormActiveForcePartialFiberLength =
-                partialNormFiberLengthPartialFiberLength *
-                calcActiveForceLengthMultiplierDerivative(normFiberLength);
-        const SimTK::Real partialNormPassiveForcePartialFiberLength =
-                partialNormFiberLengthPartialFiberLength *
-                calcPassiveForceMultiplierDerivative(normFiberLength);
-
-        // fiberStiffness = d_fiberForce / d_fiberLength
-        return get_max_isometric_force() *
-               (activation * partialNormActiveForcePartialFiberLength *
-                               fiberVelocityMultiplier +
-                       partialNormPassiveForcePartialFiberLength);
-    }
-
     /// The stiffness of the tendon in the direction of the tendon.
     /// @note based on Millard2012EquilibriumMuscle.
     SimTK::Real calcTendonStiffness(const SimTK::Real& normTendonLength) const {

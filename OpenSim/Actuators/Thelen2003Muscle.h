@@ -335,10 +335,6 @@ private:
     double calcActiveFm(double ma, double fal, 
                         double fv, double fiso) const;
 
-    //Stiffness related functions
-    double calcDFmDlce(double lce, double a,  double fv, 
-                      double fiso, double ofl) const;
-
     double calcDFmATDlce(double lce, double phi, double cosphi, 
     double Fm, double d_Fm_d_lce, double penHeight) const;
 

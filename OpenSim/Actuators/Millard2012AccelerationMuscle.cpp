@@ -792,10 +792,12 @@ void Millard2012AccelerationMuscle::
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength -  1.0;
 
-        mli.fiberPassiveForceLengthMultiplier= 
-            fpeCurve.calcValue(mli.normFiberLength);
-        mli.fiberActiveForceLengthMultiplier = 
-            falCurve.calcValue(mli.normFiberLength); 
+        SmoothSegmentedFunction::ValueAndDerivative falEval = falCurve.calcValueAndDerivative(mli.normFiberLength);
+        mli.fiberActiveForceLengthMultiplier = falEval.value;
+        mli.fiberActiveForceLengthGradient =falEval.derivative;
+        SmoothSegmentedFunction::ValueAndDerivative fpeEval = fpeCurve.calcValueAndDerivative(mli.normFiberLength);
+        mli.fiberPassiveForceLengthMultiplier= fpeEval.value;
+        mli.fiberPassiveForceLengthGradient =fpeEval.derivative;
 
         double tendonForceLengthMultiplier=fseCurve.calcValue(mli.normTendonLength);
 
@@ -1013,7 +1015,9 @@ void Millard2012AccelerationMuscle::
         // double tlN      = mli.normTendonLength;
    
         double fal  = mli.fiberActiveForceLengthMultiplier;
+        double dfal_dlceN  = mli.fiberActiveForceLengthGradient;
         double fpe  = mli.fiberPassiveForceLengthMultiplier;
+        double dfpe_dlceN  = mli.fiberPassiveForceLengthGradient;
         double fv   = mvi.fiberForceVelocityMultiplier;    
         double fse  = mli.userDefinedLengthExtras[MLIfse];
         double fk   = mli.userDefinedLengthExtras[MLIfk];
@@ -1027,7 +1031,9 @@ void Millard2012AccelerationMuscle::
                                     lce  ,dlce_dt,
                                     phi  ,dphi_dt,
                                     tl   ,dtl_dt,
-                                    fal  ,fv,fpe,fk,fcphi,fse);
+                                    fal  ,fv,fpe,fk,fcphi,fse,
+                                    dfal_dlceN,
+                                    dfpe_dlceN);
 
     //========================================================================
     //Compute viscoelastic multipliers derivatives
@@ -1224,6 +1230,9 @@ Millard2012AccelerationMuscle::initMuscleState(
     double fk  = 0; //Normalized fiber compressive force
     double fcphi=0; //Normalized pennation compressive force
 
+    // Derivatives of multipliers to normalized fiber length.
+    double dfal_dlceN = 0;
+    double dfpe_dlceN = 0;
 
     //*******************************
     //Position level
@@ -1292,8 +1301,13 @@ Millard2012AccelerationMuscle::initMuscleState(
 
         
         //Update the multipliers and their partial derivatives
-        fal         = falCurve.calcValue(lceN);
-        fpe         = fpeCurve.calcValue(lceN);
+        SmoothSegmentedFunction::ValueAndDerivative falEval = falCurve.calcValueAndDerivative(lceN);
+        fal        = falEval.value;
+        dfal_dlceN = falEval.derivative;
+        SmoothSegmentedFunction::ValueAndDerivative fpeEval = fpeCurve.calcValueAndDerivative(lceN);
+        fpe        = fpeEval.value;
+        dfpe_dlceN = fpeEval.derivative;
+
         fk          = fkCurve.calcValue(lceN);
         fcphi       = fcphiCurve.calcValue(cosphi);
         fse         = fseCurve.calcValue(tlN);            
@@ -1306,7 +1320,9 @@ Millard2012AccelerationMuscle::initMuscleState(
                                     lce  ,dlce_dt,
                                     phi  ,dphi_dt,
                                     tl   ,dtl_dt,
-                                    fal  ,fv,fpe,fk,fcphi,fse);
+                                    fal  ,fv,fpe,fk,fcphi,fse,
+                                    dfal_dlceN,
+                                    dfpe_dlceN);
 
         //==================================================================
         //Compute viscoelastic multipliers derivatives
@@ -1494,7 +1510,9 @@ Millard2012AccelerationMuscle::initMuscleState(
                                     lce  ,dlce_dt,
                                     phi  ,dphi_dt,
                                     tl   ,dtl_dt,
-                                    fal  ,fv,fpe,fk,fcphi,fse);
+                                    fal  ,fv,fpe,fk,fcphi,fse,
+                                    dfal_dlceN,
+                                    dfpe_dlceN);
         Fse = calcTendonForce(ami);
 
         // TODO: Check for a pennation angle singularity
@@ -1718,7 +1736,9 @@ void Millard2012AccelerationMuscle::
                                          double fpe,
                                          double fk,
                                          double fcphi,
-                                         double fse) const
+                                         double fse,
+                                         double dfal_dlceN,
+                                         double dfpe_dlceN) const
 {
     std::string caller = getName();
     caller.append("Millard2012AccelerationMuscle::"
@@ -1826,9 +1846,9 @@ void Millard2012AccelerationMuscle::
     
     //Multiplier partial derivatives 
         ami.dfse_dtl        = fseCurve.calcDerivative(tlN,1)  * dtlN_dtl;     
-        ami.dfal_dlce       = falCurve.calcDerivative(lceN,1) * dlceN_dlce;
-        ami.dfpe_dlce       = fpeCurve.calcDerivative(lceN,1) * dlceN_dlce;    
         ami.dfk_dlce        = fkCurve.calcDerivative(lceN,1)  * dlceN_dlce;     
+        ami.dfal_dlce       = dfal_dlceN * dlceN_dlce;
+        ami.dfpe_dlce       = dfpe_dlceN * dlceN_dlce;    
         
         double dfcphi_dcosphi   = fcphiCurve.calcDerivative(ami.cosphi,1); 
         double dcosphi_dlce     = -ami.sinphi*ami.dphi_dlce;

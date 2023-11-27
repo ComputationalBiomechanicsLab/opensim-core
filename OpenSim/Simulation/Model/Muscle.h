@@ -34,7 +34,43 @@
     #endif
 #endif
 
+// TODO:
+// - [ ] MillardEquilibrium
+// - [ ] MillardAcceleraton
+// - [x] Thelen
+// - [x] deGroote
 namespace OpenSim {
+
+//==============================================================================
+//                          Muscle Helper Functions
+//==============================================================================
+namespace HillTypeMuscle {
+
+// Calculates the fiber stiffness as the parial derivative of fiber force to
+// fiber length.
+//    @param fiso the maximum isometric force the fiber can generate
+//    @param a activation
+//    @param fv the fiber force-velocity multiplier
+//    @param optFibLen the optimal fiber length
+//    @param dfal_lceN derivative of active-force-length curve to normalized fiber
+//    length, evaluated at current fiber length.
+//    @param dfpe_lceN derivative of passive-force-length curve to normalized fiber
+//    length, evaluated at current fiber length.
+inline double calcFiberStiffness(
+    double fiso,
+    double a,
+    double fv,
+    double optFibLen,
+    double dfal_dlceN,
+    double dfpe_dlceN)
+{
+    double DlceN_Dlce = 1.0 / optFibLen;
+    double Dfal_Dlce  = dfal_dlceN * DlceN_Dlce;
+    double Dfpe_Dlce  = dfpe_dlceN * DlceN_Dlce;
+    return fiso * (a * Dfal_Dlce * fv + Dfpe_Dlce);
+}
+
+}
 
 //==============================================================================
 //                              Muscle Exceptions
@@ -556,40 +592,45 @@ protected:
         - use as necessary.
        
     */
-    struct MuscleLengthInfo{             //DIMENSION         Units      
-        double fiberLength;              //length            m  
-        double fiberLengthAlongTendon;   //length            m
-        double normFiberLength;          //length/length     m/m        
-                
-        double tendonLength;             //length            m
-        double normTendonLength;         //length/length     m/m        
-        double tendonStrain;             //length/length     m/m        
-                                         //
-        double pennationAngle;           //angle             1/s (rads)        
-        double cosPennationAngle;        //NA                NA         
-        double sinPennationAngle;        //NA                NA         
+    struct MuscleLengthInfo
+    {                                  // DIMENSION         Units
+        double fiberLength;            // length            m
+        double fiberLengthAlongTendon; // length            m
+        double normFiberLength;        // length/length     m/m
 
-        double fiberPassiveForceLengthMultiplier;   //NA             NA
-        double fiberActiveForceLengthMultiplier;  //NA             NA
-        
-        SimTK::Vector userDefinedLengthExtras;//NA        NA
+        double tendonLength;           // length            m
+        double normTendonLength;       // length/length     m/m
+        double tendonStrain;           // length/length     m/m
 
-        MuscleLengthInfo(): 
-            fiberLength(SimTK::NaN), 
-            fiberLengthAlongTendon(SimTK::NaN),
-            normFiberLength(SimTK::NaN),            
-            tendonLength(SimTK::NaN), 
-            normTendonLength(SimTK::NaN), 
-            tendonStrain(SimTK::NaN), 
-            pennationAngle(SimTK::NaN), 
-            cosPennationAngle(SimTK::NaN),
+        double pennationAngle;         // angle             1/s (rads)
+        double cosPennationAngle;      // NA                NA
+        double sinPennationAngle;      // NA                NA
+
+        double fiberPassiveForceLengthMultiplier; // NA     NA
+        double fiberActiveForceLengthMultiplier;  // NA     NA
+
+        double fiberPassiveForceLengthGradient;   // 1/length     1/m
+        double fiberActiveForceLengthGradient;    // 1/length     1/m
+
+        SimTK::Vector userDefinedLengthExtras;    // NA     NA
+
+        MuscleLengthInfo() :
+            fiberLength(SimTK::NaN), fiberLengthAlongTendon(SimTK::NaN),
+            normFiberLength(SimTK::NaN), tendonLength(SimTK::NaN),
+            normTendonLength(SimTK::NaN), tendonStrain(SimTK::NaN),
+            pennationAngle(SimTK::NaN), cosPennationAngle(SimTK::NaN),
             sinPennationAngle(SimTK::NaN),
-            fiberPassiveForceLengthMultiplier(SimTK::NaN), 
+            fiberPassiveForceLengthMultiplier(SimTK::NaN),
             fiberActiveForceLengthMultiplier(SimTK::NaN),
-            userDefinedLengthExtras(0, SimTK::NaN){}
-        friend std::ostream& operator<<(std::ostream& o, 
-            const MuscleLengthInfo& mli) {
-            o << "Muscle::MuscleLengthInfo should not be serialized!" 
+            fiberPassiveForceLengthGradient(SimTK::NaN),
+            fiberActiveForceLengthGradient(SimTK::NaN),
+            userDefinedLengthExtras(0, SimTK::NaN)
+        {}
+        friend std::ostream& operator<<(
+            std::ostream& o,
+            const MuscleLengthInfo& mli)
+        {
+            o << "Muscle::MuscleLengthInfo should not be serialized!"
               << std::endl;
             return o;
         }
@@ -663,6 +704,7 @@ protected:
         double normTendonVelocity;          //(length/time)/length  (m/s)/m
 
         double fiberForceVelocityMultiplier;     //force/force           NA
+        double fiberForceVelocityGradient;
 
         SimTK::Vector userDefinedVelocityExtras;//NA                  NA
 
