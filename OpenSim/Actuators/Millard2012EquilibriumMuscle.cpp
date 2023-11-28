@@ -911,7 +911,6 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
         const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
 
         // Get the static properties of this muscle.
-        double dlenMcl   = getLengtheningSpeed(s);
         double optFibLen = getOptimalFiberLength();
 
         //======================================================================
@@ -934,6 +933,7 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
                 dlceN = 0.0;
                 fv    = 1.0;
             } else {
+                double dlenMcl   = getLengtheningSpeed(s);
                 dlce = getPennationModel().
                          calcFiberVelocity(mli.cosPennationAngle, dlenMcl, 0.0);
                 dlceN = dlce/(optFibLen*getMaxContractionVelocity());
@@ -1030,13 +1030,6 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
         double dlceAT = getPennationModel().calcFiberVelocityAlongTendon(
             mli.fiberLength, dlce, mli.sinPennationAngle, mli.cosPennationAngle,
             dphidt);
-        double dmcldt = getLengtheningSpeed(s);
-        double dtl = 0;
-
-        if(!get_ignore_tendon_compliance()) {
-            dtl = getPennationModel().calcTendonVelocity(mli.cosPennationAngle,
-                mli.sinPennationAngle, dphidt, mli.fiberLength, dlce, dmcldt);
-        }
 
         // Check to see whether the fiber state is clamped.
         double fiberStateClamped = 0.0;
@@ -1045,7 +1038,6 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
             dlceN = 0.0;
             dlceAT = 0.0;
             dphidt = 0.0;
-            dtl = dmcldt;
             fv = 1.0; //to be consistent with a fiber velocity of 0
             fiberStateClamped = 1.0;
         }
@@ -1055,8 +1047,6 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
         fvi.normFiberVelocity            = dlceN;
         fvi.fiberVelocityAlongTendon     = dlceAT;
         fvi.pennationAngularVelocity     = dphidt;
-        fvi.tendonVelocity               = dtl;
-        fvi.normTendonVelocity           = dtl/getTendonSlackLength();
         fvi.fiberForceVelocityMultiplier = fv;
 
         fvi.userDefinedVelocityExtras.resize(1);
@@ -1200,10 +1190,7 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
         //double dphidt       = mvi.pennationAngularVelocity;
         double dFibPEdt     = p1Fm*mvi.fiberVelocity; //only conservative part
                                                       //of passive fiber force
-        double dTdnPEdt     = fse*fiso*mvi.tendonVelocity;
         double dFibWdt      = -(mdi.activeFiberForce+p2Fm)*mvi.fiberVelocity;
-        double dmcldt       = getLengtheningSpeed(s);
-        double dBoundaryWdt = mdi.tendonForce*dmcldt;
 
         //double dSysEdt = (dFibPEdt + dTdnPEdt) - dFibWdt - dBoundaryWdt;
         //double tol = sqrt(SimTK::Eps);
@@ -1211,8 +1198,6 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
         // Populate the power entries.
         mdi.fiberActivePower  = dFibWdt;
         mdi.fiberPassivePower = -(dFibPEdt);
-        mdi.tendonPower       = -dTdnPEdt;
-        mdi.musclePower       = -dBoundaryWdt;
 
         // Store quantities unique to this Muscle: the passive conservative
         // (elastic) fiber force and the passive non-conservative (damping)

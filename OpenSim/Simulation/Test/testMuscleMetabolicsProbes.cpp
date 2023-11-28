@@ -256,8 +256,6 @@ public:
                         (getMaxContractionVelocity() * getOptimalFiberLength());
 
         fvi.pennationAngularVelocity     = 0;
-        fvi.tendonVelocity               = 0;
-        fvi.normTendonVelocity           = 0;
         fvi.fiberForceVelocityMultiplier = 1;
     }
 
@@ -305,8 +303,6 @@ public:
         mdi.muscleStiffness       = 0;
         mdi.fiberActivePower      = 0;
         mdi.fiberPassivePower     = 0;
-        mdi.tendonPower           = 0;
-        mdi.musclePower           = 0;
     }
 
 private:

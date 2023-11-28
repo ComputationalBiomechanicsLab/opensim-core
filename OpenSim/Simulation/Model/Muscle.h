@@ -659,9 +659,6 @@ protected:
                                             //
         double pennationAngularVelocity;    //angle/time            rad/s
                                             //
-        double tendonVelocity;              //length/time           m/s
-        double normTendonVelocity;          //(length/time)/length  (m/s)/m
-
         double fiberForceVelocityMultiplier;     //force/force           NA
 
         SimTK::Vector userDefinedVelocityExtras;//NA                  NA
@@ -671,8 +668,6 @@ protected:
             fiberVelocityAlongTendon(SimTK::NaN),
             normFiberVelocity(SimTK::NaN),
             pennationAngularVelocity(SimTK::NaN),
-            tendonVelocity(SimTK::NaN), 
-            normTendonVelocity(SimTK::NaN),
             fiberForceVelocityMultiplier(SimTK::NaN),
             userDefinedVelocityExtras(0,SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
@@ -784,8 +779,6 @@ protected:
                                         //
         double fiberActivePower;        // force*velocity       W
         double fiberPassivePower;       // force*velocity       W
-        double tendonPower;             // force*velocity       W
-        double musclePower;             // force*velocity       W
 
         SimTK::Vector userDefinedDynamicsExtras; //NA          NA
 
@@ -804,8 +797,6 @@ protected:
             muscleStiffness(SimTK::NaN),
             fiberActivePower(SimTK::NaN),
             fiberPassivePower(SimTK::NaN),
-            tendonPower(SimTK::NaN),
-            musclePower(SimTK::NaN),
             userDefinedDynamicsExtras(0, SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
             const MuscleDynamicsInfo& mdi) {

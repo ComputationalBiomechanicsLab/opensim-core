@@ -926,8 +926,6 @@ void Millard2012AccelerationMuscle::
         //double dlceAT = m_penMdl.
         double tanPhi = tan(phi);
         double dphidt    = m_penMdl.calcPennationAngularVelocity(tanPhi,lce,dlce);   
-        double dtl       = m_penMdl.calcTendonVelocity(cosphi,sinphi,dphidt,
-                                                        lce,  dlce,mclVelocity);
 
         //Populate the struct;
         fvi.fiberVelocity               = dlce;
@@ -936,9 +934,6 @@ void Millard2012AccelerationMuscle::
         fvi.normFiberVelocity           = dlceN1;
 
         fvi.pennationAngularVelocity    = dphidt;
-
-        fvi.tendonVelocity              = dtl;
-        fvi.normTendonVelocity = dtl/getTendonSlackLength();
 
         fvi.fiberForceVelocityMultiplier = fv;
 
@@ -1009,7 +1004,7 @@ void Millard2012AccelerationMuscle::
         double dphi_dt      = mvi.pennationAngularVelocity;
     
         double tl       = mli.tendonLength; 
-        double dtl_dt   = mvi.tendonVelocity;
+        double dtl_dt   = getTendonVelocity(s);
         // double tlN      = mli.normTendonLength;
    
         double fal  = mli.fiberActiveForceLengthMultiplier;
@@ -1086,12 +1081,10 @@ void Millard2012AccelerationMuscle::
         double dfpePEdt    =  (ami.fpe)  * ami.cosphi   * fiso * ami.dlceAT_dt;
         double dfkPEdt     = -(ami.fk)   * ami.cosphi   * fiso * ami.dlceAT_dt;    
         double dfcphiPEdt  = -(ami.fcphi)               * fiso * ami.dlceAT_dt;
-        double dfsePEdt    =  (ami.fse)                 * fiso * ami.dtl_dt;
 
         double dfpeVdt    = -(ami.fpeV)   * ami.cosphi  * fiso * ami.dlceAT_dt;
         double dfkVdt     =  (ami.fkV)    * ami.cosphi  * fiso * ami.dlceAT_dt;    
         double dfcphiVdt  =  (ami.fcphiV)               * fiso * ami.dlceAT_dt;
-        double dfseVdt    = -(ami.fseV)                 * fiso * ami.dtl_dt;
         double dfibVdt    = -(ami.fibV                  * fiso * ami.dlce_dt);
 
         // double dfpeVEMdt   =  ami.fpeVEM   * ami.cosphi  * fiso * ami.dlceAT_dt;
@@ -1148,9 +1141,6 @@ void Millard2012AccelerationMuscle::
         mdi.fiberPassivePower   = -(dKEdt + (dfpePEdt + dfkPEdt + dfcphiPEdt)                    
                                         - (dfpeVdt  + dfkVdt  + dfcphiVdt)
                                         - dfibVdt);
-        mdi.tendonPower         = -(dfsePEdt-dfseVdt);       
-        mdi.musclePower         = -dBoundaryWdt;
-
 
         //if(abs(tmp) > tol)
         //    printf("%s: d/dt(system energy-work) > tol, (%f > %f) at time %f",

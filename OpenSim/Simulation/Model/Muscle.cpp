@@ -387,7 +387,8 @@ double Muscle::getFiberVelocityAlongTendon(const SimTK::State& s) const
 /* get the tendon velocity (m/s) */
 double Muscle::getTendonVelocity(const SimTK::State& s) const
 {
-    return getFiberVelocityInfo(s).tendonVelocity;
+    return get_ignore_tendon_compliance() ? 0. : getSpeed(s) -
+        getFiberVelocityInfo(s).fiberVelocityAlongTendon;
 }
 
 /* get the dimensionless factor resulting from the fiber's force-velocity curve */
@@ -491,15 +492,14 @@ double Muscle::getFiberPassivePower(const SimTK::State& s) const
 /* get the current tendon power (W) */
 double Muscle::getTendonPower(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).tendonPower;
+    return -getTendonVelocity(s) * getMuscleDynamicsInfo(s).tendonForce;
 }
 
 /* get the current muscle power (W) */
 double Muscle::getMusclePower(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).musclePower;
+    return -getLengtheningSpeed(s) * getMuscleDynamicsInfo(s).tendonForce;
 }
-
 
 void Muscle::setExcitation(SimTK::State& s, double excitation) const
 {
