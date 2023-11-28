@@ -494,6 +494,37 @@ public:
 //==============================================================================
 protected:
 
+    struct MuscleStateInfo :
+        MuscleOutputLength,
+        MuscleOutputVelocity,
+        MuscleOutputForce
+    {
+        MuscleStateInfo():
+        MuscleOutputLength(),
+        MuscleOutputVelocity(),
+        MuscleOutputForce()
+        {}
+
+        double passiveForcePassiveElastic = SimTK::NaN;
+        double passiveForceDampedFiberForce = SimTK::NaN;
+    };
+
+    void calcMuscleStateInfo(const SimTK::State& s, MuscleStateInfo& mli) const;
+
+    const MuscleStateInfo& getMuscleStateInfo(const SimTK::State& s) const;
+
+    const MuscleOutputLength& calcOutputLength(const SimTK::State& s) const override
+    {
+        return getMuscleStateInfo(s);
+    }
+
+    const MuscleOutputVelocity& calcOutputVelocity(const SimTK::State& s) const override
+    {
+        return getMuscleStateInfo(s);
+    }
+
+    const MuscleOutputForce& calcMuscleOutputForce(const SimTK::State& s) const override;
+
     /** Gets the derivative of an actuator state by index.
         @param s The state.
         @param aStateName The name of the state to get.
@@ -514,22 +545,22 @@ protected:
 //==============================================================================
     /** Calculate the position-related values associated with the muscle state
     (fiber and tendon lengths, normalized lengths, pennation angle, etc.). */
-    void calcMuscleLengthInfo(const SimTK::State& s,
-                              MuscleLengthInfo& mli) const override;
+    /*void calcMuscleLengthInfo(const SimTK::State& s, */
+    /*                          MuscleLengthInfo& mli) const override; */
 
-    /** Calculate the velocity-related values associated with the muscle state
-    (fiber and tendon velocities, normalized velocities, pennation angular
-    velocity, etc.). */
-    void calcFiberVelocityInfo(const SimTK::State& s,
-                               FiberVelocityInfo& fvi) const override;
+    /*/1** Calculate the velocity-related values associated with the muscle state */
+    /*(fiber and tendon velocities, normalized velocities, pennation angular */
+    /*velocity, etc.). *1/ */
+    /*void calcFiberVelocityInfo(const SimTK::State& s, */
+    /*                           FiberVelocityInfo& fvi) const override; */
 
-    /** Calculate the dynamics-related values associated with the muscle state
-    (from the active- and passive-force-length curves, the force-velocity curve,
-    and the tendon-force-length curve). The last entry is a SimTK::Vector
-    containing the passive conservative (elastic) fiber force and the passive
-    non-conservative (damping) fiber force. */
-    void calcMuscleDynamicsInfo(const SimTK::State& s,
-                                MuscleDynamicsInfo& mdi) const override;
+    /*/1** Calculate the dynamics-related values associated with the muscle state */
+    /*(from the active- and passive-force-length curves, the force-velocity curve, */
+    /*and the tendon-force-length curve). The last entry is a SimTK::Vector */
+    /*containing the passive conservative (elastic) fiber force and the passive */
+    /*non-conservative (damping) fiber force. *1/ */
+    /*void calcMuscleDynamicsInfo(const SimTK::State& s, */
+    /*                            MuscleDynamicsInfo& mdi) const override; */
 
     /** Calculate the potential energy values associated with the muscle */
     void  calcMusclePotentialEnergyInfo(const SimTK::State& s, 
@@ -699,6 +730,8 @@ private:
                                  const double aSolTolerance,
                                  const int aMaxIterations,
                                  bool staticSolution=false) const;
+
+    mutable CacheVariable<MuscleStateInfo> _stateInfoCV;
 
 };
 } //end of namespace OpenSim
