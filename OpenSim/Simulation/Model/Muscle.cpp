@@ -226,7 +226,10 @@ void Muscle::extendConnectToModel(Model& aModel)
     //              both the position and velocity of the multibody system and
     //              the muscles path before solving for the fiber length and
     //              velocity in the reduced model.
-    this->_lengthInfoCV = addCacheVariable("lengthInfo", MuscleLengthInfo(), SimTK::Stage::Velocity);
+    this->_lengthInfoCV = addCacheVariable("lengthInfo", MuscleLengthInfo(),
+            SimTK::Stage::Velocity);
+    this->_forceInfoCV  = addCacheVariable("forceInfo", MuscleForceCache(),
+            SimTK::Stage::Velocity);
     this->_velInfoCV = addCacheVariable("velInfo", FiberVelocityInfo(), SimTK::Stage::Velocity);
     this->_dynamicsInfoCV = addCacheVariable("dynamicsInfo", MuscleDynamicsInfo(), SimTK::Stage::Dynamics);
     this->_potentialEnergyInfoCV = addCacheVariable("potentialEnergyInfo", MusclePotentialEnergyInfo(), SimTK::Stage::Velocity);
@@ -555,6 +558,49 @@ getMuscleDynamicsInfo(const SimTK::State& s) const
     markCacheVariableValid(s, _dynamicsInfoCV);
     return umdi;
 }
+
+const Muscle::MuscleForceCache& Muscle::
+getMuscleForceInfo(const SimTK::State& s) const
+{
+    if (isCacheVariableValid(s, _forceInfoCV)) {
+        return getCacheVariableValue(s, _forceInfoCV);
+    }
+
+    Muscle::MuscleForceCache& mfi = updCacheVariableValue(s, _forceInfoCV);
+    calcMuscleForceCache(s, mfi);
+    markCacheVariableValid(s, _forceInfoCV);
+    return mfi;
+}
+
+void Muscle::calcMuscleForceInfo(
+        const SimTK::State& s,
+        const Muscle::MuscleLengthInfo& mli,
+        Muscle::MuscleForceInfo& mfi) const
+{
+    throw Exception("ERROR- "+getConcreteClassName()
+        + "::calcMuscleForceInfo() NOT IMPLEMENTED.");
+}
+
+void Muscle::calcMuscleForceCache(
+        const SimTK::State& s,
+        Muscle::MuscleForceCache& mfc) const
+{
+    const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
+    try {
+        calcMuscleForceInfo(s, mli, mfc);
+    } catch(const std::exception &x) {
+        std::string msg =
+            "Exception caught in "
+            + getConcreteClassName()
+            + "::calcMuscleForceInfo from "
+            + getName() + "\n" + x.what();
+        throw OpenSim::Exception(msg);
+    }
+    mfc.fiberLength       = mli.fiberLength;
+    mfc.cosPennationAngle = mli.cosPennationAngle;
+    mfc.sinPennationAngle = mli.sinPennationAngle;
+}
+
 Muscle::MuscleDynamicsInfo& Muscle::
 updMuscleDynamicsInfo(const SimTK::State& s) const
 {

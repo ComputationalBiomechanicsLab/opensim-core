@@ -595,6 +595,111 @@ protected:
         }
     };
 
+    struct MuscleForceInfo
+    {
+        double fiberVelocity                     = SimTK::NaN;
+
+        double fiberPassiveForceLengthMultiplier = SimTK::NaN;
+        double fiberActiveForceLengthMultiplier  = SimTK::NaN;
+        double fiberForceVelocityMultiplier      = SimTK::NaN;
+
+        double activation                        = SimTK::NaN;
+
+        double fiberForcePassiveElastic          = SimTK::NaN;
+        double fiberForcePassiveDamping          = SimTK::NaN;
+        double fiberForceActive                  = SimTK::NaN;
+        double fiberForce                        = SimTK::NaN;
+
+        double tendonForce                       = SimTK::NaN;
+
+        double fiberStiffness                    = SimTK::NaN;
+        double tendonStiffness                   = SimTK::NaN;
+    };
+
+    virtual void calcMuscleForceInfo(
+        const SimTK::State& s,
+        const MuscleLengthInfo& mli,
+        MuscleForceInfo& mfi) const;
+
+    struct MuscleForceCache : public MuscleForceInfo
+    {
+        double fiberLength = SimTK::NaN;
+        double cosPennationAngle = SimTK::NaN;
+        double sinPennationAngle = SimTK::NaN;
+
+        double calcPennationAngularVelocity() const
+        {
+            return -(fiberVelocity / fiberLength) * sinPennationAngle /
+                   cosPennationAngle;
+        }
+
+        double calcPennationAngularVelocity()
+        {
+            return -(fiberVelocity / fiberLength) * sinPennationAngle /
+                   cosPennationAngle;
+        }
+
+        double calcFiberVelocityAlongTendon()
+        {
+            return fiberVelocity * cosPennationAngle -
+                   fiberLength * sinPennationAngle *
+                       calcPennationAngularVelocity();
+        }
+
+        double calcTendonVelocity(double muscleTendonVelocity)
+        {
+            return muscleTendonVelocity - calcFiberVelocityAlongTendon();
+        }
+
+        double calcFiberForceAlongTendon()
+        {
+            return fiberForce * cosPennationAngle;
+        }
+
+        double calcFiberStiffnessAlongTendon()
+        {
+            double DcosPhi_Dlce = (1. / cosPennationAngle - cosPennationAngle) /
+                                  fiberLength;
+            return fiberStiffness * cosPennationAngle +
+                   fiberForce * DcosPhi_Dlce;
+        }
+
+        double calcMuscleStiffness()
+        {
+            double fiber_stiffness_along_tendon =
+                calcFiberStiffnessAlongTendon();
+            return fiber_stiffness_along_tendon /
+                   (fiber_stiffness_along_tendon / tendonStiffness + 1.);
+        }
+
+        double calcFiberActivePower(double muscleTendonVelocity)
+        {
+            return -(fiberForceActive + fiberForcePassiveDamping) *
+                   muscleTendonVelocity;
+        }
+
+        double calcFiberPassivePower(double muscleTendonVelocity)
+        {
+            return -fiberForcePassiveElastic * muscleTendonVelocity;
+        }
+
+        double calcTendonPower(double muscleTendonVelocity)
+        {
+            return -tendonForce * calcTendonVelocity(muscleTendonVelocity);
+        }
+
+        double calcMusclePower(double muscleTendonVelocity)
+        {
+            return -tendonForce * muscleTendonVelocity;
+        }
+    };
+
+    void calcMuscleForceCache(
+            const SimTK::State& s,
+            MuscleForceCache& mfc) const;
+
+    const MuscleForceCache& getMuscleForceInfo(const SimTK::State& s) const;
+
     /**
         FiberVelocityInfo contains velocity quantities related to the velocity
         of the muscle (fiber + tendon) complex.
@@ -866,7 +971,9 @@ protected:
     mutable CacheVariable<Muscle::MuscleLengthInfo> _lengthInfoCV;
     mutable CacheVariable<Muscle::FiberVelocityInfo> _velInfoCV;
     mutable CacheVariable<Muscle::MuscleDynamicsInfo> _dynamicsInfoCV;
-    mutable CacheVariable<Muscle::MusclePotentialEnergyInfo> _potentialEnergyInfoCV;
+    mutable CacheVariable<Muscle::MusclePotentialEnergyInfo>
+        _potentialEnergyInfoCV;
+    mutable CacheVariable<Muscle::MuscleForceCache> _forceInfoCV;
 
 //=============================================================================
 };  // END of class Muscle
