@@ -633,38 +633,37 @@ protected:
                    cosPennationAngle;
         }
 
-        double calcPennationAngularVelocity()
-        {
-            return -(fiberVelocity / fiberLength) * sinPennationAngle /
-                   cosPennationAngle;
-        }
-
-        double calcFiberVelocityAlongTendon()
+        double calcFiberVelocityAlongTendon() const
         {
             return fiberVelocity * cosPennationAngle -
                    fiberLength * sinPennationAngle *
                        calcPennationAngularVelocity();
         }
 
-        double calcTendonVelocity(double muscleTendonVelocity)
+        double calcTendonVelocity(double muscleTendonVelocity) const
         {
             return muscleTendonVelocity - calcFiberVelocityAlongTendon();
         }
 
-        double calcFiberForceAlongTendon()
+        double calcFiberForceAlongTendon() const // TODO remove trivial
         {
             return fiberForce * cosPennationAngle;
         }
 
-        double calcFiberStiffnessAlongTendon()
+        double calcFiberStiffnessAlongTendon() const
         {
-            double DcosPhi_Dlce = (1. / cosPennationAngle - cosPennationAngle) /
-                                  fiberLength;
-            return fiberStiffness * cosPennationAngle +
-                   fiberForce * DcosPhi_Dlce;
+            // cos(phi) = sqrt( 1 - h^2 / lce^2)
+            double DcosPhi_Dlce =
+                (1. / cosPennationAngle - cosPennationAngle) / fiberLength;
+            // fmAT = fm * cos(phi)
+            double DfmAT_Dlce
+                = fiberStiffness * cosPennationAngle
+                + fiberForce * DcosPhi_Dlce;
+            double Dlce_DlceAT = cosPennationAngle;
+            return DfmAT_Dlce * Dlce_DlceAT;
         }
 
-        double calcMuscleStiffness()
+        double calcMuscleStiffness() const
         {
             double fiber_stiffness_along_tendon =
                 calcFiberStiffnessAlongTendon();
@@ -672,25 +671,35 @@ protected:
                    (fiber_stiffness_along_tendon / tendonStiffness + 1.);
         }
 
-        double calcFiberActivePower(double muscleTendonVelocity)
+        double calcFiberActivePower() const
         {
             return -(fiberForceActive + fiberForcePassiveDamping) *
-                   muscleTendonVelocity;
+                   fiberVelocity;
         }
 
-        double calcFiberPassivePower(double muscleTendonVelocity)
+        double calcFiberPassivePower() const
         {
-            return -fiberForcePassiveElastic * muscleTendonVelocity;
+            return -fiberForcePassiveElastic * fiberVelocity;
         }
 
-        double calcTendonPower(double muscleTendonVelocity)
+        double calcTendonPower(double muscleTendonVelocity) const
         {
             return -tendonForce * calcTendonVelocity(muscleTendonVelocity);
         }
 
-        double calcMusclePower(double muscleTendonVelocity)
+        double calcMusclePower(double muscleTendonVelocity) const
         {
             return -tendonForce * muscleTendonVelocity;
+        }
+
+        double calcPassiveFiberForce() const
+        {
+            return fiberForcePassiveDamping + fiberForcePassiveElastic;
+        }
+
+        double calcPassiveFiberForceAlongTendon() const // TODO remove trivial
+        {
+            return calcPassiveFiberForce() * cosPennationAngle;
         }
     };
 

@@ -39,6 +39,23 @@ const double MIN_NONZERO_DAMPING_COEFFICIENT = 0.001;
 namespace
 {
 
+void checkComp(double x, double y, std::string name, double eta0 = 1e-13, bool scale = false){
+    double diff = std::abs(x - y);
+    diff = std::min(diff,
+            std::abs(x / y - 1.)
+            );
+    double gain = std::max(std::abs(x) / 2. + std::abs(y) /2., 1.);
+    double eta = scale? gain * eta0 : eta0;
+    if (x == y || (std::isnan(x) && std::isnan(y))) {
+        diff = 0.;
+    }
+    if (diff >  eta ) {
+        std::string msg = fmt::format("{} check: diff = {} - {} = {} > eta = {} * {} = {}", name, x, y, diff, eta0, gain, eta);
+        std::string err_msg = fmt::format("Failed {}", msg);
+        SimTK_ERRCHK_ALWAYS(diff < eta, "Check Computations",err_msg.c_str());
+    }
+}
+
 // Calculates the active fiber force.
 //    @param fiso maximum isometric force
 //    @param a activation
@@ -213,12 +230,13 @@ DampedFiberVelocityCalculationResult calcDampedNormFiberVelocity(
     }
 
     bool converged = abs(err) <= tol;
-
-    // If we failed to converge, it's probably because the fiber is at its lower
-    // bound. That decision is made further down the line, so if convergence
-    // didn't happen, let the user know and return a NaN.
     if (!converged) {
-        dlceN_dt = -1.;
+        // Throw an exception here because there is no point integrating
+        // a muscle velocity that is invalid (it will end up producing
+        // invalid fiber lengths and will ultimately cause numerical
+        // problems).
+        OPENSIM_THROW(OpenSim::Exception,
+            " Fiber velocity Newton method did not converge");
     }
 
     return {
@@ -593,15 +611,15 @@ double Millard2012EquilibriumMuscle::getMinimumFiberLengthAlongTendon() const
 
 double Millard2012EquilibriumMuscle::
 getTendonForceMultiplier(SimTK::State& s) const
-{   return getMuscleDynamicsInfo(s).normTendonForce; }
+{   return getMuscleForceInfo(s).tendonForce / getMaxIsometricForce(); }
 
 double Millard2012EquilibriumMuscle::
 getFiberStiffnessAlongTendon(const SimTK::State& s) const
-{ return getMuscleDynamicsInfo(s).fiberStiffnessAlongTendon; }
+{ return getMuscleForceInfo(s).calcFiberForceAlongTendon(); }
 
 double Millard2012EquilibriumMuscle::
 getFiberVelocity(const SimTK::State& s) const
-{   return getFiberVelocityInfo(s).fiberVelocity; }
+{   return getMuscleForceInfo(s).fiberVelocity; }
 
 double Millard2012EquilibriumMuscle::
 getActivationDerivative(const SimTK::State& s) const
@@ -616,27 +634,27 @@ getActivationDerivative(const SimTK::State& s) const
 double Millard2012EquilibriumMuscle::
 getPassiveFiberElasticForce(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).userDefinedDynamicsExtras[0];
+    return getMuscleForceInfo(s).fiberForcePassiveElastic;
 }
 
 double Millard2012EquilibriumMuscle::
 getPassiveFiberElasticForceAlongTendon(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).userDefinedDynamicsExtras[0] *
-           getMuscleLengthInfo(s).cosPennationAngle;
+    return getMuscleForceInfo(s).fiberForcePassiveElastic *
+           getMuscleForceInfo(s).cosPennationAngle;
 }
 
 double Millard2012EquilibriumMuscle::
 getPassiveFiberDampingForce(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).userDefinedDynamicsExtras[1];
+    return getMuscleForceInfo(s).fiberForcePassiveDamping;
 }
 
 double Millard2012EquilibriumMuscle::
 getPassiveFiberDampingForceAlongTendon(const SimTK::State& s) const
 {
-    return getMuscleDynamicsInfo(s).userDefinedDynamicsExtras[1] *
-           getMuscleLengthInfo(s).cosPennationAngle;
+    return getMuscleForceInfo(s).fiberForcePassiveDamping *
+           getMuscleForceInfo(s).cosPennationAngle;
 }
 
 
@@ -724,9 +742,9 @@ setFiberLength(SimTK::State& s, double fiberLength) const
 double Millard2012EquilibriumMuscle::
 computeActuation(const SimTK::State& s) const
 {
-    const MuscleDynamicsInfo& mdi = getMuscleDynamicsInfo(s);
-    setActuation(s, mdi.tendonForce);
-    return mdi.tendonForce;
+    const double tendonForce = getMuscleForceInfo(s).tendonForce;
+    setActuation(s, tendonForce);
+    return tendonForce;
 }
 
 
@@ -985,23 +1003,27 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
     // equilibrium equations.
     //======================================================================
 
+    double dlce = SimTK::NaN;
     double dlceN = SimTK::NaN;
     double fv    = SimTK::NaN;
 
     const double dlenMcl = getLengtheningSpeed(s);
 
     // Calculate fiber velocity.
+    /* std::cout << "get_ignore_tendon_compliance = " << get_ignore_tendon_compliance() << std::endl; */
+    /* std::cout << "use_fiber_damping = " << use_fiber_damping << std::endl; */
     if (get_ignore_tendon_compliance()) {
         // Rigid tendon.
 
         if (lt < tsl - SimTK::SignificantReal) {
             // The tendon is buckling, so fiber velocity is zero.
+            dlce  = 0.0;
             dlceN = 0.0;
             fv    = 1.0;
         } else {
-            const double dlce = penMdl.calcFiberVelocity(cosPhi, dlenMcl, 0.);
-            dlceN             = dlce / (lopt * vMax);
-            fv                = get_ForceVelocityCurve().calcValue(dlceN);
+            dlce  = penMdl.calcFiberVelocity(cosPhi, dlenMcl, 0.);
+            dlceN = dlce/(lopt*getMaxContractionVelocity());
+            fv    = get_ForceVelocityCurve().calcValue(dlceN);
         }
 
     } else if (!get_ignore_tendon_compliance() && !use_fiber_damping) {
@@ -1009,6 +1031,7 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
         fv = calcUndampedFiberForceVelocityMultiplier(a, fal, fpe, fse, cosPhi);
         // Evaluate the inverse force-velocity curve.
         dlceN = fvInvCurve.calcValue(fv);
+        dlce  = dlceN*getMaxContractionVelocity()*lopt;
 
     } else {
 
@@ -1025,24 +1048,13 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
                 getForceVelocityCurve(),
                 fvInvCurve);
 
-        if (!result.converged) {
-            // Throw an exception here because there is no point integrating
-            // a muscle velocity that is invalid (it will end up producing
-            // invalid fiber lengths and will ultimately cause numerical
-            // problems). The idea is to produce an exception and catch this
-            // early before it can cause more damage.
-            OPENSIM_THROW(
-                OpenSim::Exception,
-                getName() + " Fiber velocity Newton method did not converge");
-        }
-
         // If the Newton method converged, update the fiber velocity.
         dlceN = result.normFiberVelocity;
+        dlce = dlceN * getOptimalFiberLength() * getMaxContractionVelocity();
         fv    = get_ForceVelocityCurve().calcValue(dlceN);
     }
 
     // Check to see whether the fiber state is clamped.
-    double dlce            = dlceN * vMax * lopt;
     bool fiberStateClamped = isFiberStateClamped(mli.fiberLength, dlce);
     if (fiberStateClamped) {
         mfi.fiberVelocity                = 0.;
@@ -1092,7 +1104,7 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
     mfi.fiberForcePassiveDamping = p2Fm;
     mfi.fiberForceActive         = aFm;
     mfi.fiberForce               = fm;
-    mfi.tendonForce = get_ignore_tendon_compliance() ? fm * cosPhi : fse * fiso;
+    mfi.tendonForce = get_ignore_tendon_compliance() ? (( fm * cosPhi ) / fiso ) * fiso: fse * fiso;
     //======================================================================
 
     //======================================================================
@@ -1211,16 +1223,6 @@ calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const
                     getForceVelocityCurve(),
                     fvInvCurve);
 
-            if (!result.converged) {
-                // Throw an exception here because there is no point integrating
-                // a muscle velocity that is invalid (it will end up producing
-                // invalid fiber lengths and will ultimately cause numerical
-                // problems). The idea is to produce an exception and catch this
-                // early before it can cause more damage.
-                OPENSIM_THROW(OpenSim::Exception,
-                    getName() +
-                    " Fiber velocity Newton method did not converge");
-            }
 
             // If the Newton method converged, update the fiber velocity.
             dlceN = result.normFiberVelocity;
@@ -1424,6 +1426,150 @@ calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
         mdi.userDefinedDynamicsExtras.resize(2);
         mdi.userDefinedDynamicsExtras[0] = p1Fm; //elastic
         mdi.userDefinedDynamicsExtras[1] = p2Fm; //damping
+
+        /* if (true) { */
+        {
+            checkComp(
+                    getMuscleForceInfo(s).fiberPassiveForceLengthMultiplier,
+                    mli.fiberPassiveForceLengthMultiplier,
+                    "fiberPassiveForceLengthMultiplier",
+                    1e-20
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberActiveForceLengthMultiplier,
+                    mli.fiberActiveForceLengthMultiplier,
+                    "fiberActiveForceLengthMultiplier",
+                    1e-20
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberForceVelocityMultiplier,
+                    mvi.fiberForceVelocityMultiplier,
+                    "fiberForceVelocityMultiplier",
+                    1e-20
+                    );
+
+            checkComp(
+                    getMuscleForceInfo(s).activation,
+                    mdi.activation,
+                    "activation",
+                    1e-20
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberVelocity,
+                    mvi.fiberVelocity,
+                    "fiberVelocity",
+                    1e-20
+                    );
+
+            checkComp(
+                    getMuscleForceInfo(s).fiberForceActive,
+                    mdi.activeFiberForce,
+                    "fiberForceActive"
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberForce,
+                    mdi.fiberForce,
+                    "fiberForce",
+                    1e-20
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberForcePassiveDamping,
+                    p2Fm,
+                    "fiberForcePassiveDamping"
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberForcePassiveElastic,
+                    p1Fm,
+                    "fiberForcePassiveElastic"
+                    );
+
+            checkComp(
+                    getMuscleForceInfo(s).tendonForce,
+                    mdi.tendonForce,
+                    "tendonForce",
+                    1e-20
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).fiberStiffness,
+                    mdi.fiberStiffness,
+                    "fiberStiffness",
+                    1e-11
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).tendonStiffness,
+                    mdi.tendonStiffness,
+                    "tendonStiffness",
+                    1e-10
+                    );
+
+            // Check computations:
+            checkComp(
+                    getMuscleForceInfo(s).calcPennationAngularVelocity(),
+                    mvi.pennationAngularVelocity,
+                    "pennationAngularVelocity",
+                    1e-10
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberVelocityAlongTendon(),
+                    mvi.fiberVelocityAlongTendon,
+                    "fiberVelocityAlongTendon",
+                    1e-11
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcTendonVelocity(getLengtheningSpeed(s)),
+                    mvi.tendonVelocity,
+                    "tendonVelocity",
+                    1e-11
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberVelocityAlongTendon(),
+                    mvi.fiberVelocityAlongTendon,
+                    "fiberVelocityAlongTendon",
+                    1e-11
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberForceAlongTendon(),
+                    mdi.fiberForceAlongTendon,
+                    "fiberForceAlongTendon",
+                    1e-11
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberStiffnessAlongTendon(),
+                    mdi.fiberStiffnessAlongTendon,
+                    "fiberStiffnessAlongTendon",
+                    1e-11, true
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcMuscleStiffness(),
+                    mdi.muscleStiffness,
+                    "muscleStiffness",
+                    1e-11, true
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcMusclePower(getLengtheningSpeed(s)),
+                    mdi.musclePower,
+                    "musclePower",
+                    1e-11, true
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberPassivePower(),
+                    mdi.fiberPassivePower,
+                    "fiberPassivePower",
+                    1e-11, true
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcTendonPower(getLengtheningSpeed(s)),
+                    mdi.tendonPower,
+                    "tendonPower",
+                    1e-11, true
+                    );
+            checkComp(
+                    getMuscleForceInfo(s).calcFiberActivePower(),
+                    mdi.fiberActivePower,
+                    "fiberActivePower",
+                    1e-11, true
+                    );
+        }
 
     } catch(const std::exception &x) {
         std::string msg = "Exception caught in Millard2012EquilibriumMuscle::"
