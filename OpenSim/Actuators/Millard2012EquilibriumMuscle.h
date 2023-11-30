@@ -517,6 +517,11 @@ protected:
     void calcMuscleLengthInfo(const SimTK::State& s,
                               MuscleLengthInfo& mli) const override;
 
+    void calcMuscleForceInfo(
+        const SimTK::State& s,
+        const MuscleLengthInfo& mli,
+        MuscleForceInfo& mfi) const override;
+
     /** Calculate the velocity-related values associated with the muscle state
     (fiber and tendon velocities, normalized velocities, pennation angular
     velocity, etc.). */
