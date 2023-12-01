@@ -1027,8 +1027,6 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
     double dlceN = SimTK::NaN;
     double fv    = SimTK::NaN;
 
-    const double dlenMcl = getLengtheningSpeed(s);
-
     // Calculate fiber velocity.
     /* std::cout << "get_ignore_tendon_compliance = " << get_ignore_tendon_compliance() << std::endl; */
     /* std::cout << "use_fiber_damping = " << use_fiber_damping << std::endl; */
@@ -1041,6 +1039,7 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
             dlceN = 0.0;
             fv    = 1.0;
         } else {
+            const double dlenMcl = getLengtheningSpeed(s);
             dlce  = penMdl.calcFiberVelocity(cosPhi, dlenMcl, 0.);
             dlceN = dlce/(lopt*getMaxContractionVelocity());
             fv    = get_ForceVelocityCurve().calcValue(dlceN);
