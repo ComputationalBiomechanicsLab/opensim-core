@@ -142,6 +142,7 @@ double calcUndampedFiberForceVelocityMultiplier(
 struct DampedFiberVelocityCalculationResult final
 {
     double normFiberVelocity;
+    double fiberForceVelocityMultiplier;
     double convergenceError;
     bool converged;
 };
@@ -207,12 +208,14 @@ DampedFiberVelocityCalculationResult calcDampedNormFiberVelocity(
     double df_d_dlceNdt = 0.0;
 
     while (abs(err) > tol && iter < maxIter) {
-        fv         = fvCurve.calcValue(dlceN_dt);
+        auto fvEval         = fvCurve.calcValueAndDerivative(dlceN_dt);
+        fv = fvEval.value;
+
         fiberForce = calcFiberForce(fiso, a, fal, fv, fpe, dlceN_dt, beta);
 
         err = fiberForce * cosPhi - fse * fiso;
         df_d_dlceNdt =
-            fiso * (a * fal * fvCurve.calcDerivative(dlceN_dt, 1) + beta);
+            fiso * (a * fal * fvEval.derivative + beta);
         derr_d_dlceNdt = df_d_dlceNdt * cosPhi;
 
         if (abs(err) > tol && abs(derr_d_dlceNdt) > SimTK::SignificantReal) {
@@ -241,9 +244,26 @@ DampedFiberVelocityCalculationResult calcDampedNormFiberVelocity(
 
     return {
         dlceN_dt,
+        fv,
         err,
         converged,
     };
+}
+
+double CalcFiberStiffness(
+        double fiso,
+        double a,
+        double fv,
+        double optFibLen,
+        double Dfal_DlceN,
+        double Dfpe_DlceN)
+{
+    double DlceN_Dlce = 1.0/optFibLen;
+    double Dfal_Dlce  = Dfal_DlceN * DlceN_Dlce;
+    double Dfpe_Dlce  = Dfpe_DlceN * DlceN_Dlce;
+
+    // DFm_Dlce
+    return  fiso * (a*Dfal_Dlce*fv + Dfpe_Dlce);
 }
 
 } // namespace
@@ -866,11 +886,6 @@ void Millard2012EquilibriumMuscle::calcMuscleLengthInfo(const SimTK::State& s,
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength - 1.0;
 
-        mli.fiberPassiveForceLengthMultiplier =
-            fpeCurve.calcValue(mli.normFiberLength);
-        mli.fiberActiveForceLengthMultiplier =
-            falCurve.calcValue(mli.normFiberLength);
-
     } catch(const std::exception &x) {
         std::string msg = "Exception caught in Millard2012EquilibriumMuscle::"
                           "calcMuscleLengthInfo from " + getName() + "\n"
@@ -973,16 +988,21 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
     const FiberForceLengthCurve& fpeCurve  = get_FiberForceLengthCurve();
     const TendonForceLengthCurve& fseCurve = get_TendonForceLengthCurve();
 
-    const double fal = falCurve.calcValue(lceN);
-    const double fpe = fpeCurve.calcValue(lceN);
-    const double fse =
-        get_ignore_tendon_compliance() ? SimTK::NaN : fseCurve.calcValue(ltN);
+    const auto falEval = falCurve.calcValueAndDerivative(lceN);
+    const auto fpeEval = fpeCurve.calcValueAndDerivative(lceN);
+    const auto fseEval = get_ignore_tendon_compliance()
+        ? SmoothSegmentedFunction::ValueAndDerivative{
+            SimTK::NaN,
+            SimTK::Infinity}
+        : fseCurve.calcValueAndDerivative(ltN);
 
-    const double Dfal_DlceN = falCurve.calcDerivative(lceN, 1);
-    const double Dfpe_DlceN = fpeCurve.calcDerivative(lceN, 1);
-    const double Dfse_DltlN = get_ignore_tendon_compliance()
-                                  ? SimTK::Infinity
-                                  : fseCurve.calcDerivative(ltN, 1);
+    const double fal = falEval.value;
+    const double fpe = fpeEval.value;
+    const double fse = fseEval.value;
+
+    const double Dfal_DlceN = falEval.derivative;
+    const double Dfpe_DlceN = fpeEval.derivative;
+    const double Dfse_DltlN = fseEval.derivative;
 
     //======================================================================
     mfi.fiberActiveForceLengthMultiplier  = fal;
@@ -1108,7 +1128,7 @@ void Millard2012EquilibriumMuscle::calcMuscleForceInfo(
     //======================================================================
 
     //======================================================================
-    mfi.fiberStiffness = calcFiberStiffness(fiso, a, fv, lceN, lopt);
+    mfi.fiberStiffness = CalcFiberStiffness(fiso, a, fv, lopt, Dfal_DlceN, Dfpe_DlceN);
     //======================================================================
 
     //======================================================================

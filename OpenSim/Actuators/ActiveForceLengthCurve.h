@@ -209,6 +209,8 @@ public:
     'normFiberLength'. */
     double calcValue(double normFiberLength) const;
 
+    SmoothSegmentedFunction::ValueAndDerivative calcValueAndDerivative(double normFiberLength) const;
+
 
     /** Calculates the derivative of the active-force-length multiplier with
     respect to the normalized fiber length.
