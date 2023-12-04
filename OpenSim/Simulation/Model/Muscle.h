@@ -359,7 +359,6 @@ public:
 protected:
     struct MuscleLengthInfo;
     struct FiberVelocityInfo;
-    struct MuscleDynamicsInfo;
     struct MusclePotentialEnergyInfo;
 
     /** Developer Access to intermediate values calculate by the muscle model */
@@ -368,9 +367,6 @@ protected:
 
     const FiberVelocityInfo& getFiberVelocityInfo(const SimTK::State& s) const;
     FiberVelocityInfo& updFiberVelocityInfo(const SimTK::State& s) const;
-
-    const MuscleDynamicsInfo& getMuscleDynamicsInfo(const SimTK::State& s) const;
-    MuscleDynamicsInfo& updMuscleDynamicsInfo(const SimTK::State& s) const;
 
     const MusclePotentialEnergyInfo& getMusclePotentialEnergyInfo(const SimTK::State& s) const;
     MusclePotentialEnergyInfo& updMusclePotentialEnergyInfo(const SimTK::State& s) const;
@@ -393,11 +389,6 @@ protected:
     /** calculate muscle's fiber velocity and pennation angular velocity, etc... */
     virtual void calcFiberVelocityInfo(const SimTK::State& s, 
         FiberVelocityInfo& fvi) const;
-
-    /** calculate muscle's active and passive force-length, force-velocity, 
-        tendon force, relationships and their related values */
-    virtual void  calcMuscleDynamicsInfo(const SimTK::State& s, 
-        MuscleDynamicsInfo& mdi) const;
 
     /** calculate muscle's fiber and tendon potential energy */
     virtual void calcMusclePotentialEnergyInfo(const SimTK::State& s,
@@ -596,8 +587,9 @@ protected:
     };
 
     /**
-        FiberVelocityInfo contains velocity quantities related to the velocity
-        of the muscle (fiber + tendon) complex.
+        FiberVelocityInfo contains quantities related to the computing the
+        muscle fiber velocity. In general this requires computing force related
+        quantities as well.
         
         The function that populates this struct, calcFiberVelocityInfo, is called
         when position and velocity information is known. This function is the 
@@ -619,7 +611,28 @@ protected:
              
              fiberForceVelocityMultiplier force/force          NA        [5]
 
-             userDefinedVelocityExtras    NA                   NA      [6]
+             activation                  NA                   NA     [6]
+
+             fiberForce                  force                N
+             fiberForceAlongTendon       force                N      [7]
+             normFiberForce              force/force          N/N    [8]
+             activeFiberForce            force                N      [9]
+             passiveFiberForce           force                N      [10]
+
+             tendonForce                 force                N
+             normTendonForce             force/force          N/N    [11]
+
+             fiberStiffness              force/length         N/m    [12]
+             fiberStiffnessAlongTendon   force/length         N/m    [13]
+             tendonStiffness             force/length         N/m    [14]
+             muscleStiffness             force/length         N/m    [15]
+
+             fiberActivePower            force*velocity       W (N*m/s)
+             fiberPassivePower           force*velocity       W (N*m/s)
+             tendonPower                 force*velocity       W (N*m/s)
+             musclePower                 force*velocity       W (N*m/s)
+
+             userDefinedVelocityExtras    NA                   NA      [16]
         
         [1] fiberVelocityAlongTendon is the first derivative of the symbolic
             equation that defines the fiberLengthAlongTendon.
@@ -651,6 +664,53 @@ protected:
             any assumptions about what is or isn't in this field
             - use as necessary.
 
+        [6] This is a quantity that ranges between 0 and 1 that dictates how
+            on or activated a muscle is. This term may or may not have its own
+            time dependent behavior depending on the muscle model.
+
+        [7] fiberForceAlongTendon is the fraction of the force that is developed
+            by the fiber that is transmitted to the tendon. This fraction 
+            depends on the pennation model that is used for the muscle model
+
+        [8] This is the force developed by the fiber scaled by the maximum 
+            isometric contraction force. Note that the maximum isometric force
+            is defined as the maximum isometric force a muscle fiber develops
+            at its optimal pennation angle, and along the line of the fiber.
+
+        [9] This is the portion of the fiber force that is created as a direct
+            consequence of the value of 'activation'.
+
+        [10] This is the portion of the fiber force that is created by the 
+            parallel elastic element within the fiber.
+    
+        [11] This is the tendonForce normalized by the maximum isometric 
+            contraction force
+
+        [12] fiberStiffness is defined as the partial derivative of fiber force
+            with respect to fiber length
+
+        [13] fiberStiffnessAlongTendon is defined as the partial derivative of 
+            fiber force along the tendon with respect to small changes in
+            the fiber length along the tendon. This quantity is normally 
+            computed using the equations for fiberStiffness, and then using an 
+            application of the chain rule to yield fiberStiffnessAlongTendon.
+
+        [14] tendonStiffness is defined as the partial derivative of tendon
+            force with respect to tendon length
+
+        [15] muscleStiffness is defined as the partial derivative of muscle force
+            with respect to changes in muscle length. This quantity can usually
+            be computed by noting that the tendon and the fiber are in series,
+            with the fiber at a pennation angle. Thus
+
+            Kmuscle =   (Kfiber_along_tendon * Ktendon)
+                       /(Kfiber_along_tendon + Ktendon) 
+
+        [16] This vector is left for the muscle modeler to populate with any
+             computationally expensive quantities that might be of interest 
+             after dynamics calculations are completed but maybe of use
+             in computing muscle derivatives or reporting values of interest.
+
     */
     struct FiberVelocityInfo {              //DIMENSION             UNITS
         double fiberVelocity;               //length/time           m/s
@@ -662,110 +722,10 @@ protected:
         double tendonVelocity;              //length/time           m/s
         double normTendonVelocity;          //(length/time)/length  (m/s)/m
 
+        double fiberPassiveForceLengthMultiplier;   //NA             NA
+        double fiberActiveForceLengthMultiplier;  //NA             NA
         double fiberForceVelocityMultiplier;     //force/force           NA
 
-        SimTK::Vector userDefinedVelocityExtras;//NA                  NA
-
-        FiberVelocityInfo(): 
-            fiberVelocity(SimTK::NaN), 
-            fiberVelocityAlongTendon(SimTK::NaN),
-            normFiberVelocity(SimTK::NaN),
-            pennationAngularVelocity(SimTK::NaN),
-            tendonVelocity(SimTK::NaN), 
-            normTendonVelocity(SimTK::NaN),
-            fiberForceVelocityMultiplier(SimTK::NaN),
-            userDefinedVelocityExtras(0,SimTK::NaN){};
-        friend std::ostream& operator<<(std::ostream& o, 
-            const FiberVelocityInfo& fvi) {
-            o << "Muscle::FiberVelocityInfo should not be serialized!" 
-              << std::endl;
-            return o;
-        }
-    };
-
-    /**
-        MuscleDynamicsInfo contains quantities that are related to the forces
-        that the muscle generates. 
-        
-        The function that populates this struct, calcMuscleDynamicsInfo, is 
-        called when position and velocity information is known. This function 
-        is the last function that is called of these related functions:
-        calcMuscleLengthInfo, calcFiberVelocityInfo and calcMuscleDynamicInfo. 
-
-
-           NAME                         DIMENSION           UNITS                                               
-            activation                  NA                   NA     [1]
-
-            fiberForce                  force                N
-            fiberForceAlongTendon       force                N      [2]
-            normFiberForce              force/force          N/N    [3]
-            activeFiberForce            force                N      [4]
-            passiveFiberForce           force                N      [5]
-                                        
-            tendonForce                 force                N
-            normTendonForce             force/force          N/N    [6]
-                                        
-            fiberStiffness              force/length         N/m    [7]   
-            fiberStiffnessAlongTendon   force/length         N/m    [8]
-            tendonStiffness             force/length         N/m    [9]
-            muscleStiffness             force/length         N/m    [10]
-                                        
-            fiberActivePower            force*velocity       W (N*m/s)
-            fiberPassivePower           force*velocity       W (N*m/s)
-            tendonPower                 force*velocity       W (N*m/s)
-            musclePower                 force*velocity       W (N*m/s)
-
-            userDefinedDynamicsData     NA                   NA     [11]
-
-        [1] This is a quantity that ranges between 0 and 1 that dictates how
-            on or activated a muscle is. This term may or may not have its own
-            time dependent behavior depending on the muscle model.
-
-        [2] fiberForceAlongTendon is the fraction of the force that is developed
-            by the fiber that is transmitted to the tendon. This fraction 
-            depends on the pennation model that is used for the muscle model
-
-        [3] This is the force developed by the fiber scaled by the maximum 
-            isometric contraction force. Note that the maximum isometric force
-            is defined as the maximum isometric force a muscle fiber develops
-            at its optimal pennation angle, and along the line of the fiber.
-
-        [4] This is the portion of the fiber force that is created as a direct
-            consequence of the value of 'activation'.
-
-        [5] This is the portion of the fiber force that is created by the 
-            parallel elastic element within the fiber.
-    
-        [6] This is the tendonForce normalized by the maximum isometric 
-            contraction force
-
-        [7] fiberStiffness is defined as the partial derivative of fiber force
-            with respect to fiber length
-
-        [8] fiberStiffnessAlongTendon is defined as the partial derivative of 
-            fiber force along the tendon with respect to small changes in
-            the fiber length along the tendon. This quantity is normally 
-            computed using the equations for fiberStiffness, and then using an 
-            application of the chain rule to yield fiberStiffnessAlongTendon.
-
-        [9] tendonStiffness is defined as the partial derivative of tendon
-            force with respect to tendon length
-
-        [10] muscleStiffness is defined as the partial derivative of muscle force
-            with respect to changes in muscle length. This quantity can usually
-            be computed by noting that the tendon and the fiber are in series,
-            with the fiber at a pennation angle. Thus
-
-            Kmuscle =   (Kfiber_along_tendon * Ktendon)
-                       /(Kfiber_along_tendon + Ktendon) 
-
-        [11] This vector is left for the muscle modeler to populate with any
-             computationally expensive quantities that might be of interest 
-             after dynamics calculations are completed but maybe of use
-             in computing muscle derivatives or reporting values of interest.
-
-    */
-    struct MuscleDynamicsInfo {     //DIMENSION             UNITS
         double activation;              // NA                   NA
                                         //
         double fiberForce;              // force                N
@@ -787,17 +747,26 @@ protected:
         double tendonPower;             // force*velocity       W
         double musclePower;             // force*velocity       W
 
-        SimTK::Vector userDefinedDynamicsExtras; //NA          NA
+        SimTK::Vector userDefinedVelocityExtras;//NA                  NA
 
-        MuscleDynamicsInfo(): 
-            activation(SimTK::NaN), 
+        FiberVelocityInfo(): 
+            fiberVelocity(SimTK::NaN), 
+            fiberVelocityAlongTendon(SimTK::NaN),
+            normFiberVelocity(SimTK::NaN),
+            pennationAngularVelocity(SimTK::NaN),
+            tendonVelocity(SimTK::NaN), 
+            normTendonVelocity(SimTK::NaN),
+            fiberPassiveForceLengthMultiplier(SimTK::NaN),
+            fiberActiveForceLengthMultiplier(SimTK::NaN),
+            fiberForceVelocityMultiplier(SimTK::NaN),
+            activation(SimTK::NaN),
             fiberForce(SimTK::NaN),
             fiberForceAlongTendon(SimTK::NaN),
-            normFiberForce(SimTK::NaN), 
+            normFiberForce(SimTK::NaN),
             activeFiberForce(SimTK::NaN),
             passiveFiberForce(SimTK::NaN),
             tendonForce(SimTK::NaN),
-            normTendonForce(SimTK::NaN), 
+            normTendonForce(SimTK::NaN),
             fiberStiffness(SimTK::NaN),
             fiberStiffnessAlongTendon(SimTK::NaN),
             tendonStiffness(SimTK::NaN),
@@ -806,10 +775,10 @@ protected:
             fiberPassivePower(SimTK::NaN),
             tendonPower(SimTK::NaN),
             musclePower(SimTK::NaN),
-            userDefinedDynamicsExtras(0, SimTK::NaN){};
+            userDefinedVelocityExtras(0, SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
-            const MuscleDynamicsInfo& mdi) {
-            o << "Muscle::MuscleDynamicsInfo should not be serialized!" 
+            const FiberVelocityInfo& fvi) {
+            o << "Muscle::FiberVelocityInfo should not be serialized!"
               << std::endl;
             return o;
         }
@@ -865,7 +834,6 @@ protected:
 
     mutable CacheVariable<Muscle::MuscleLengthInfo> _lengthInfoCV;
     mutable CacheVariable<Muscle::FiberVelocityInfo> _velInfoCV;
-    mutable CacheVariable<Muscle::MuscleDynamicsInfo> _dynamicsInfoCV;
     mutable CacheVariable<Muscle::MusclePotentialEnergyInfo> _potentialEnergyInfoCV;
 
 //=============================================================================

@@ -507,21 +507,16 @@ void ActivationFiberLengthMuscle_Deprecated::calcFiberVelocityInfo(const SimTK::
 {
     fvi.fiberVelocity = getFiberLengthDeriv(s);
     fvi.normFiberVelocity = fvi.fiberVelocity/(getOptimalFiberLength()*getMaxContractionVelocity());
-}
 
-/* calculate muscle's active and passive force-length, force-velocity, 
-    tendon force, relationships and their related values */
-void ActivationFiberLengthMuscle_Deprecated::calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const
-{
     const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
     const double &maxIsometricForce = getMaxIsometricForce();
 
     double tendonForce = getActuation(s);
-    mdi.normTendonForce = tendonForce/maxIsometricForce;
+    fvi.normTendonForce = tendonForce/maxIsometricForce;
     
-    mdi.passiveFiberForce = mli.fiberPassiveForceLengthMultiplier * maxIsometricForce;
+    fvi.passiveFiberForce = mli.fiberPassiveForceLengthMultiplier * maxIsometricForce;
     
-    mdi.activation = getStateVariableValue(s, STATE_ACTIVATION_NAME);
+    fvi.activation = getStateVariableValue(s, STATE_ACTIVATION_NAME);
 
-    mdi.activeFiberForce =  tendonForce/mli.cosPennationAngle - mdi.passiveFiberForce;
+    fvi.activeFiberForce =  tendonForce/mli.cosPennationAngle - fvi.passiveFiberForce;
 }
