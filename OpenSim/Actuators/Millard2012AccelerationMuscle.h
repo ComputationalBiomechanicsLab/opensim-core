@@ -640,8 +640,8 @@ public:
         
 ///@cond DEPRECATED
     /*  Once the ignore_tendon_compliance flag is implemented correctly get rid 
-        of this method as it duplicates code in calcMuscleLengthInfo,
-        calcFiberVelocityInfo, and calcMuscleDynamicsInfo
+        of this method as it duplicates code in calcMuscleLengthInfo and
+        calcFiberVelocityInfo.
     */
     double calcInextensibleTendonActiveFiberForce(SimTK::State& s, 
                                        double aActivation) const override final;
@@ -695,16 +695,6 @@ protected:
     */
     void calcFiberVelocityInfo(const SimTK::State& s, 
                                FiberVelocityInfo& fvi) const override final;
-
-    /** calculate muscle's active and passive force-length, force-velocity, 
-        tendon force, relationships and their related values 
-    @param s the state of the model
-    @param mdi the muscle dynamics info struct that will hold updated 
-            information about the muscle that is available at the dynamics stage    
-    */
-    void calcMuscleDynamicsInfo(const SimTK::State& s, 
-                                 MuscleDynamicsInfo& mdi) const override final;
-
 
     void calcMusclePotentialEnergyInfo(const SimTK::State& s,
         MusclePotentialEnergyInfo& mpei) const override final;

@@ -165,7 +165,6 @@ void ActivationFiberLengthMuscle::setFiberLength(SimTK::State& s, double fiberLe
     // invalidate the length info whenever fiber length is set.
     markCacheVariableInvalid(s, _lengthInfoCV);
     markCacheVariableInvalid(s, _velInfoCV);
-    markCacheVariableInvalid(s, _dynamicsInfoCV);
 }
 
 double ActivationFiberLengthMuscle::getActivationRate(const SimTK::State& s) const

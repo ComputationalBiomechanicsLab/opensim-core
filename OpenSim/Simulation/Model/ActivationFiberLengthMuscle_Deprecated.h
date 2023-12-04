@@ -151,7 +151,6 @@ protected:
     // Muscle interface
     void calcMuscleLengthInfo(const SimTK::State& s, MuscleLengthInfo& mli) const override;
     void calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi) const override;
-    void calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi) const override;
 
     virtual double calcActiveForce(const SimTK::State& s, double aNormFiberLength) const
     {
