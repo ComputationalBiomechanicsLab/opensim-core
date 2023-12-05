@@ -187,7 +187,7 @@ public:
     /// If ignore_activation_dynamics is true, this gets excitation instead.
     double getActivation(const SimTK::State& s) const override {
         // We override the Muscle's implementation because Muscle requires
-        // realizing to Dynamics to access activation from MuscleDynamicsInfo,
+        // realizing to Dynamics to access activation from MuscleVelocityInfo,
         // which is unnecessary if the activation is a state.
         if (get_ignore_activation_dynamics()) {
             return getControl(s);

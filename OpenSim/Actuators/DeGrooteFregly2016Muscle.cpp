@@ -494,9 +494,8 @@ void DeGrooteFregly2016Muscle::calcFiberVelocityInfo(
     SimTK::Real normTendonForce = SimTK::NaN;
     SimTK::Real normTendonForceDerivative = SimTK::NaN;
     if (!get_ignore_tendon_compliance()) {
-        if (m_isTendonDynamicsExplicit) {
-            normTendonForce = getNormalizedTendonForce(s);
-        } else {
+        normTendonForce = getNormalizedTendonForce(s);
+        if (!m_isTendonDynamicsExplicit) {
             normTendonForceDerivative = getNormalizedTendonForceDerivative(s);
         }
     }
