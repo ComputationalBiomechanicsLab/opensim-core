@@ -271,20 +271,20 @@ public:
         // for force F, then applying the modifications described in [1].
         // Negative fiber velocity corresponds to concentric contraction.
         double ArelStar = pow(fvi.activation,-0.3) * get_Arel();
-        if (getFiberVelocity(s) <= 0) {
-            double v  = max(getFiberVelocity(s),
+        if (fvi.fiberVelocity <= 0) {
+            double v  = max(fvi.fiberVelocity,
                         -getMaxContractionVelocity() * getOptimalFiberLength());
             double t1 = get_Brel() * getOptimalFiberLength();
-            fvi.fiberForce = (t1*getActiveForceLengthMultiplier(s) + ArelStar*v)
+            fvi.fiberForce = (t1*fvi.fiberActiveForceLengthMultiplier + ArelStar*v)
                              / (t1 - v);
         } else {
             double c2 = -get_FmaxEccentric() / fvi.activation;
             double c3 = (get_FmaxEccentric()-1) * get_Brel() / (fvi.activation *
-                            2 * (getActiveForceLengthMultiplier(s) + ArelStar));
+                            2 * (fvi.fiberActiveForceLengthMultiplier + ArelStar));
             double c1 = (get_FmaxEccentric()-1) * c3 / fvi.activation;
             fvi.fiberForce = -(getOptimalFiberLength() * (c1 + c2*c3)
-                               + c2*getFiberVelocity(s)) /
-                             (getFiberVelocity(s) + c3*getOptimalFiberLength());
+                               + c2*fvi.fiberVelocity) /
+                             (fvi.fiberVelocity + c3*getOptimalFiberLength());
         }
         fvi.fiberForce *= getMaxIsometricForce() * fvi.activation;
 
