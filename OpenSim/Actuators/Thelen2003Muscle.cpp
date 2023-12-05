@@ -196,6 +196,12 @@ void Thelen2003Muscle::constructProperties()
 //=============================================================================
 // GET
 //=============================================================================
+double Thelen2003Muscle::getActivation(const SimTK::State& s) const
+{
+    return getActivationModel().clampActivation(getStateVariableValue(
+                s,
+                STATE_ACTIVATION_PATH));
+}
 double Thelen2003Muscle::getActivationTimeConstant() const
 {   return get_activation_time_constant(); }
 
@@ -456,8 +462,7 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         //1. Get fiber/tendon kinematic information
 
         //clamp activation to a legal range
-        double a = getActivationModel().clampActivation(getStateVariableValue(s,
-                                          STATE_ACTIVATION_PATH));
+        double a = getActivation(s);
    
 
         double lce  = mli.fiberLength;   

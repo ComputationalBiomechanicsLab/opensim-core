@@ -175,6 +175,7 @@ public:
     These are convenience methods that get and set properties of the activation
     and pennation models. **/
     /**@{**/
+    double getActivation(const SimTK::State& s) const override;
     double getActivationTimeConstant() const;
     void setActivationTimeConstant(double actTimeConstant);
     double getDeactivationTimeConstant() const;
