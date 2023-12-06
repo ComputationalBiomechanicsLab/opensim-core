@@ -693,8 +693,9 @@ protected:
                about the muscle that is available at the velocity stage
 
     */
-    void calcFiberVelocityInfo(const SimTK::State& s, 
-                               FiberVelocityInfo& fvi) const override final;
+    void calcFiberVelocityInfo(const SimTK::State& s,
+                               const MuscleLengthInfo& mli,
+                               FiberVelocityInfo& fvi) const override;
 
     void calcMusclePotentialEnergyInfo(const SimTK::State& s,
         MusclePotentialEnergyInfo& mpei) const override final;

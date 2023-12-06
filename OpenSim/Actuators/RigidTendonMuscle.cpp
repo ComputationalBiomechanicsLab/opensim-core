@@ -152,14 +152,16 @@ void RigidTendonMuscle::calcMusclePotentialEnergyInfo(const SimTK::State& s,
 
 /* calculate muscle's velocity related values such fiber and tendon velocities,
     normalized velocities, pennation angular velocity, etc... */
-void RigidTendonMuscle::calcFiberVelocityInfo(const State& s, FiberVelocityInfo& fvi) const
+void RigidTendonMuscle::calcFiberVelocityInfo(
+        const State& s,
+        const MuscleLengthInfo& mli,
+        FiberVelocityInfo& fvi) const
 {
-    const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
     fvi.fiberVelocity = getPath().getLengtheningSpeed(s);
-    fvi.normFiberVelocity = fvi.fiberVelocity / 
+    const double normFiberVelocity = fvi.fiberVelocity /
                             (getOptimalFiberLength()*getMaxContractionVelocity());
     fvi.fiberForceVelocityMultiplier = 
-        get_force_velocity_curve().calcValue(Vector(1, fvi.normFiberVelocity));
+        get_force_velocity_curve().calcValue(Vector(1, normFiberVelocity));
 
     const Vector arg(1, mli.normFiberLength);
     fvi.fiberActiveForceLengthMultiplier =
@@ -172,20 +174,11 @@ void RigidTendonMuscle::calcFiberVelocityInfo(const State& s, FiberVelocityInfo&
                              * fvi.fiberActiveForceLengthMultiplier
                              * fvi.fiberForceVelocityMultiplier;
     fvi.activeFiberForce =  getMaxIsometricForce()*normActiveForce;
-    fvi.passiveFiberForce = getMaxIsometricForce()
+    fvi.passiveElasticFiberForce = getMaxIsometricForce()
                             * fvi.fiberPassiveForceLengthMultiplier;
-    fvi.fiberForce = fvi.activeFiberForce + fvi.passiveFiberForce;
-    fvi.fiberForceAlongTendon = fvi.fiberForce*mli.cosPennationAngle;
-    fvi.tendonForce = fvi.fiberForceAlongTendon;
-
-    fvi.normTendonForce = (normActiveForce+fvi.fiberPassiveForceLengthMultiplier)
-                          * mli.cosPennationAngle;
-
-    fvi.fiberActivePower = -(fvi.activeFiberForce) * fvi.fiberVelocity;
-    fvi.fiberPassivePower = -(fvi.passiveFiberForce) * fvi.fiberVelocity;
-    fvi.tendonPower = 0;
-    fvi.musclePower = -getMaxIsometricForce()*fvi.normTendonForce
-                        * fvi.fiberVelocity;
+    fvi.passiveDampingFiberForce = 0.;
+    fvi.fiberForce = fvi.activeFiberForce + fvi.passiveElasticFiberForce;
+    fvi.tendonForce = fvi.fiberForce * mli.cosPennationAngle;
 }
 
 //--------------------------------------------------------------------------

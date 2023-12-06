@@ -440,13 +440,12 @@ void Thelen2003Muscle::calcMusclePotentialEnergyInfo(const SimTK::State& s,
 }
 
 
-void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s, 
-                                               FiberVelocityInfo& fvi) const
+void Thelen2003Muscle::calcFiberVelocityInfo(
+    const SimTK::State& s,
+    const MuscleLengthInfo& mli,
+    FiberVelocityInfo& fvi) const
 {
     try{
-        //Get the quantities that we've already computed
-            const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
-
         //Get the static properties of this muscle
             // double mclLength      = getLength(s);
             double tendonSlackLen = getTendonSlackLength();
@@ -498,12 +497,10 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
     
             //Check for singularity conditions, and clamp output appropriately
 
-        double dmcldt = getLengtheningSpeed(s);
-
         //default values that are appropriate when fiber length has been clamped
         //to its minimum allowable value.
 
-        double fse  = calcfse(tl/tendonSlackLen);    
+        double fse  = calcfse(tl/tendonSlackLen);
         double fal  = calcfal(mli.normFiberLength);
         double fpe  = calcfpe(mli.normFiberLength);
 
@@ -513,37 +510,18 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         double fv     = afalfv/(a*fal);
         double dlceN  = calcdlceN(a,fal,afalfv);
         double dlce   = dlceN*getMaxContractionVelocity()*optFiberLen;
-        double tanPhi = tan(phi);
-        double dphidt = getPennationModel().calcPennationAngularVelocity(
-                                            tanPhi,lce,dlce);
-        double dlceAT = getPennationModel().calcFiberVelocityAlongTendon(
-                            lce, dlce, sinphi, cosphi, dphidt);
-        double dtl    = getPennationModel().calcTendonVelocity(
-                            cosphi, sinphi, dphidt, lce, dlce, dmcldt);
-    
-    
         //Switching condition: if the fiber is clamped and the tendon and the 
         //                   : fiber are out of equilibrium
         double fiberStateClamped = 0.0;
         if(isFiberStateClamped(s,dlceN)){
              dlce = 0;
-             dlceAT = 0;
              dlceN = 0;
-             dphidt = 0;
-             dtl = dmcldt;
              fv = 1.0;
              fiberStateClamped = 1.0;
         }
 
         //Populate the struct;
         fvi.fiberVelocity               = dlce;
-        fvi.fiberVelocityAlongTendon    = dlceAT;
-        fvi.normFiberVelocity           = dlceN;
-
-        fvi.pennationAngularVelocity    = dphidt;
-
-        fvi.tendonVelocity              = dtl;
-        fvi.normTendonVelocity          = dtl/getTendonSlackLength();
 
         fvi.fiberForceVelocityMultiplier = fv;
         fvi.fiberPassiveForceLengthMultiplier = fpe;
@@ -558,58 +536,26 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         double aFm          = 0; //active fiber force
         double Fm           = 0;
         double dFm_dlce     = 0;
-        double dFmAT_dlce   = 0;
-        double dFmAT_dlceAT = 0;    
         double dFt_dtl      = 0; 
-        double Ke           = 0;
 
         if(fiberStateClamped < 0.5){        
             aFm          = calcActiveFm(a,fal,fv,fiso);
             Fm           = calcFm(a,fal,fv,fpe,fiso);
             dFm_dlce     = calcDFmDlce(lce,a,fv,fiso,optFiberLen);
-            dFmAT_dlce   = calcDFmATDlce(lce,phi,cosphi,Fm,dFm_dlce,penHeight);
-
-            //The expression below is correct only because we are using a pennation
-            //model that has a parallelogram of constant height.
-            dFmAT_dlceAT= dFmAT_dlce*cosphi;
 
             dFt_dtl = calcDFseDtl(tl, fiso, tendonSlackLen);
-
-            //Compute the stiffness of the whole muscle/tendon complex
-            Ke = (dFmAT_dlceAT*dFt_dtl)/(dFmAT_dlceAT+dFt_dtl);
         }
 
         fvi.activation                   = a;
         fvi.fiberForce                   = Fm; 
-        fvi.fiberForceAlongTendon        = Fm*cosphi;
-        fvi.normFiberForce               = Fm/fiso;
         fvi.activeFiberForce             = aFm;
-        fvi.passiveFiberForce            = fpe*fiso;
+        fvi.passiveElasticFiberForce     = fpe*fiso;
+        fvi.passiveDampingFiberForce     = 0.;
 
         fvi.tendonForce                  = fse*fiso;
-        fvi.normTendonForce              = fse;
 
         fvi.fiberStiffness               = dFm_dlce;
-        fvi.fiberStiffnessAlongTendon    = dFmAT_dlceAT;
         fvi.tendonStiffness              = dFt_dtl;
-        fvi.muscleStiffness              = Ke;
-
-
-
-        //Check that the derivative of system energy less work is zero within
-        //a reasonable numerical tolerance. Throw an exception if this is not true    
-        double dFibPEdt     = fpe*fiso*dlce;
-        double dTdnPEdt     = fse*fiso*dtl;
-        double dFibWdt      = -fvi.activeFiberForce*fvi.fiberVelocity;
-        double dBoundaryWdt = fvi.tendonForce * dmcldt;
-
-        /////////////////////////////
-        //Populate the power entries
-        /////////////////////////////
-        fvi.fiberActivePower             = dFibWdt;
-        fvi.fiberPassivePower            = -dFibPEdt;
-        fvi.tendonPower                  = -dTdnPEdt;       
-        fvi.musclePower                  = -dBoundaryWdt;
     }
     catch(const std::exception &x){
         std::string msg = "Exception caught in Thelen2003Muscle::" 

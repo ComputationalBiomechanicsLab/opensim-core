@@ -365,7 +365,6 @@ protected:
     const MuscleLengthInfo& getMuscleLengthInfo(const SimTK::State& s) const;
     MuscleLengthInfo& updMuscleLengthInfo(const SimTK::State& s) const;
 
-    const FiberVelocityInfo& getFiberVelocityInfo(const SimTK::State& s) const;
     FiberVelocityInfo& updFiberVelocityInfo(const SimTK::State& s) const;
 
     const MusclePotentialEnergyInfo& getMusclePotentialEnergyInfo(const SimTK::State& s) const;
@@ -387,7 +386,9 @@ protected:
         MuscleLengthInfo& mli) const;
 
     /** calculate muscle's fiber velocity and pennation angular velocity, etc... */
-    virtual void calcFiberVelocityInfo(const SimTK::State& s, 
+    virtual void calcFiberVelocityInfo(
+        const SimTK::State& s,
+        const MuscleLengthInfo& mli,
         FiberVelocityInfo& fvi) const;
 
     /** calculate muscle's fiber and tendon potential energy */
@@ -707,13 +708,6 @@ protected:
     */
     struct FiberVelocityInfo {              //DIMENSION             UNITS
         double fiberVelocity;               //length/time           m/s
-        double fiberVelocityAlongTendon;    //length/time           m/s
-        double normFiberVelocity;           //(length/time)/Vmax    NA
-                                            //
-        double pennationAngularVelocity;    //angle/time            rad/s
-                                            //
-        double tendonVelocity;              //length/time           m/s
-        double normTendonVelocity;          //(length/time)/length  (m/s)/m
 
         double fiberPassiveForceLengthMultiplier;   //NA             NA
         double fiberActiveForceLengthMultiplier;  //NA             NA
@@ -722,52 +716,30 @@ protected:
         double activation;              // NA                   NA
                                         //
         double fiberForce;              // force                N
-        double fiberForceAlongTendon;   // force                N
-        double normFiberForce;          // force/force          N/N
         double activeFiberForce;        // force                N
-        double passiveFiberForce;       // force                N
+        double passiveElasticFiberForce;// force                N
+        double passiveDampingFiberForce;// force                N
                                         //
         double tendonForce;             // force                N
-        double normTendonForce;         // force/force          N/N
                                         //
         double fiberStiffness;          // force/length         N/m
-        double fiberStiffnessAlongTendon;//force/length         N/m
         double tendonStiffness;         // force/length         N/m
-        double muscleStiffness;         // force/length         N/m
-                                        //
-        double fiberActivePower;        // force*velocity       W
-        double fiberPassivePower;       // force*velocity       W
-        double tendonPower;             // force*velocity       W
-        double musclePower;             // force*velocity       W
 
         SimTK::Vector userDefinedVelocityExtras;//NA                  NA
 
         FiberVelocityInfo(): 
             fiberVelocity(SimTK::NaN), 
-            fiberVelocityAlongTendon(SimTK::NaN),
-            normFiberVelocity(SimTK::NaN),
-            pennationAngularVelocity(SimTK::NaN),
-            tendonVelocity(SimTK::NaN), 
-            normTendonVelocity(SimTK::NaN),
             fiberPassiveForceLengthMultiplier(SimTK::NaN),
             fiberActiveForceLengthMultiplier(SimTK::NaN),
             fiberForceVelocityMultiplier(SimTK::NaN),
             activation(SimTK::NaN),
             fiberForce(SimTK::NaN),
-            fiberForceAlongTendon(SimTK::NaN),
-            normFiberForce(SimTK::NaN),
             activeFiberForce(SimTK::NaN),
-            passiveFiberForce(SimTK::NaN),
+            passiveElasticFiberForce(SimTK::NaN),
+            passiveDampingFiberForce(SimTK::NaN),
             tendonForce(SimTK::NaN),
-            normTendonForce(SimTK::NaN),
             fiberStiffness(SimTK::NaN),
-            fiberStiffnessAlongTendon(SimTK::NaN),
             tendonStiffness(SimTK::NaN),
-            muscleStiffness(SimTK::NaN),
-            fiberActivePower(SimTK::NaN),
-            fiberPassivePower(SimTK::NaN),
-            tendonPower(SimTK::NaN),
-            musclePower(SimTK::NaN),
             userDefinedVelocityExtras(0, SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
             const FiberVelocityInfo& fvi) {
@@ -776,6 +748,106 @@ protected:
             return o;
         }
     };
+
+    struct FiberVelocityInfoCache : MuscleLengthInfo,
+                                    FiberVelocityInfo
+    {
+        double calcPennationAngularVelocity() const
+        {
+            return -(fiberVelocity / fiberLength) * sinPennationAngle /
+                   cosPennationAngle;
+        }
+
+        double calcFiberVelocityAlongTendon() const
+        {
+            return fiberVelocity * cosPennationAngle -
+                   fiberLength * sinPennationAngle *
+                       calcPennationAngularVelocity();
+        }
+
+        double calcTendonVelocity(double muscleTendonVelocity) const {
+            return muscleTendonVelocity - calcFiberVelocityAlongTendon();
+        }
+
+        double calcPassiveFiberForce() const
+        {
+            return passiveElasticFiberForce + passiveDampingFiberForce;
+        }
+
+        double calcFiberForceAlongTendon() const
+        {
+            return fiberForce * cosPennationAngle;
+        }
+
+        double calcPassiveFiberForceAlongTendon() const
+        {
+            return calcPassiveFiberForce() * cosPennationAngle;
+        }
+
+        double calcPassiveElasticFiberForceAlongTendon() const
+        {
+            return passiveElasticFiberForce * cosPennationAngle;
+        }
+
+        double calcPassiveDampingFiberForceAlongTendon() const
+        {
+            return passiveDampingFiberForce * cosPennationAngle;
+        }
+
+        double calcFiberStiffnessAlongTendon() const
+        {
+            double DcosPhi_Dlce =
+                (1. / cosPennationAngle - cosPennationAngle) / fiberLength;
+            double DfmAT_Dlce =
+                fiberStiffness * cosPennationAngle + fiberForce * DcosPhi_Dlce;
+            double Dlce_DlceAT = cosPennationAngle;
+            return DfmAT_Dlce * Dlce_DlceAT;
+        }
+
+        double calcMuscleStiffness(bool ignoreTendonCompliance) const
+        {
+            double fiber_stiffness_along_tendon =
+                calcFiberStiffnessAlongTendon();
+            // Tendon stiffness is infinite for rigid tendon muscles:
+            return ignoreTendonCompliance
+                       ? fiber_stiffness_along_tendon
+                       : fiber_stiffness_along_tendon * tendonStiffness /
+                             (fiber_stiffness_along_tendon + tendonStiffness);
+        }
+
+        double calcFiberActivePower() const
+        {
+            return -(activeFiberForce + passiveDampingFiberForce) *
+                   fiberVelocity;
+        }
+
+        double calcFiberPassivePower() const
+        {
+            return -passiveElasticFiberForce * fiberVelocity;
+        }
+
+        double calcTendonPower(double muscleTendonVelocity) const
+        {
+            return -tendonForce * calcTendonVelocity(muscleTendonVelocity);
+        }
+
+        double calcMusclePower(double muscleTendonVelocity) const
+        {
+            return -tendonForce * muscleTendonVelocity;
+        }
+    };
+
+    void calcFiberVelocityInfoCache(
+        const SimTK::State& s,
+        FiberVelocityInfoCache& fvi) const
+    {
+        MuscleLengthInfo& mli = fvi;
+        // Copy the length info fields.
+        mli = getMuscleLengthInfo(s);
+        calcFiberVelocityInfo(s, mli, fvi);
+    }
+
+    const FiberVelocityInfoCache& getFiberVelocityInfo(const SimTK::State& s) const;
 
     /**
         MusclePotentialEnergyInfo contains quantities related to the potential
@@ -826,7 +898,7 @@ protected:
     double _tendonSlackLength;
 
     mutable CacheVariable<Muscle::MuscleLengthInfo> _lengthInfoCV;
-    mutable CacheVariable<Muscle::FiberVelocityInfo> _velInfoCV;
+    mutable CacheVariable<Muscle::FiberVelocityInfoCache> _velInfoCV;
     mutable CacheVariable<Muscle::MusclePotentialEnergyInfo> _potentialEnergyInfoCV;
 
 //=============================================================================

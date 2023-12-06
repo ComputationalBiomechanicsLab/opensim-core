@@ -232,22 +232,17 @@ public:
     }
 
     // Calculate velocity-level variables.
-    void calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi)
+    void calcFiberVelocityInfo(
+            const SimTK::State& s,
+            const MuscleLengthInfo& mli,
+            FiberVelocityInfo& fvi)
         const override
     {
         fvi.fiberVelocity = getStateVariableValue(s, stateName_fiberVelocity);
-        fvi.fiberVelocityAlongTendon = fvi.fiberVelocity;
-        fvi.normFiberVelocity        = fvi.fiberVelocity /
-                        (getMaxContractionVelocity() * getOptimalFiberLength());
-
-        fvi.pennationAngularVelocity     = 0;
-        fvi.tendonVelocity               = 0;
-        fvi.normTendonVelocity           = 0;
 
         // The fiberActiveForceLengthMultiplier (referred to as 'Fisom' in [3])
         // is the proportion of maxIsometricForce that would be delivered
         // isometrically at maximal activation. Fisom=1 if Lce=Lceopt.
-        const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
         if (mli.fiberLength < (1 - get_width()) * getOptimalFiberLength() ||
             mli.fiberLength > (1 + get_width()) * getOptimalFiberLength())
             fvi.fiberActiveForceLengthMultiplier = 0;
@@ -288,20 +283,10 @@ public:
         }
         fvi.fiberForce *= getMaxIsometricForce() * fvi.activation;
 
-        fvi.fiberForceAlongTendon = fvi.fiberForce;
-        fvi.normFiberForce        = fvi.fiberForce / getMaxIsometricForce();
         fvi.activeFiberForce      = fvi.fiberForce;
-        fvi.passiveFiberForce     = 0;
         fvi.tendonForce           = fvi.fiberForce;
-        fvi.normTendonForce       = fvi.normFiberForce;
         fvi.fiberStiffness        = 0;
-        fvi.fiberStiffnessAlongTendon = 0;
         fvi.tendonStiffness       = 0;
-        fvi.muscleStiffness       = 0;
-        fvi.fiberActivePower      = 0;
-        fvi.fiberPassivePower     = 0;
-        fvi.tendonPower           = 0;
-        fvi.musclePower           = 0;
     }
 
 private:

@@ -521,6 +521,7 @@ protected:
     (fiber and tendon velocities, normalized velocities, pennation angular
     velocity, etc.). */
     void calcFiberVelocityInfo(const SimTK::State& s,
+                               const MuscleLengthInfo& mli,
                                FiberVelocityInfo& fvi) const override;
 
     /** Calculate the potential energy values associated with the muscle */
