@@ -602,6 +602,16 @@ void Muscle::calcFiberVelocityInfo(
         + "::calcFiberVelocityInfo() NOT IMPLEMENTED.");
 }
 
+void Muscle::calcFiberVelocityInfoCache(
+    const SimTK::State& s,
+    FiberVelocityInfoCache& fvi) const
+{
+    MuscleLengthInfo& mli = fvi;
+    // Copy the length info fields.
+    mli = getMuscleLengthInfo(s);
+    calcFiberVelocityInfo(s, mli, fvi);
+}
+
 /* calculate muscle's fiber and tendon potential energy */
 void Muscle::calcMusclePotentialEnergyInfo(const SimTK::State& s,
     MusclePotentialEnergyInfo& mpei) const

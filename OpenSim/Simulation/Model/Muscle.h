@@ -829,13 +829,7 @@ protected:
 
     void calcFiberVelocityInfoCache(
         const SimTK::State& s,
-        FiberVelocityInfoCache& fvi) const
-    {
-        MuscleLengthInfo& mli = fvi;
-        // Copy the length info fields.
-        mli = getMuscleLengthInfo(s);
-        calcFiberVelocityInfo(s, mli, fvi);
-    }
+        FiberVelocityInfoCache& fvi) const;
 
     const FiberVelocityInfoCache& getFiberVelocityInfo(const SimTK::State& s) const;
 
