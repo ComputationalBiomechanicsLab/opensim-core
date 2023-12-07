@@ -896,6 +896,25 @@ private:
                                           const AccelerationMuscleInfo& ami,
                                           std::string& caller) const;
 
+    struct ForceMultipliersCV;
+
+    /** Calculate muscle's force-multiplier values that are specific to this
+     * muscle .
+    @param s the state of the model
+    @param multipliers struct holding the computed multipliers
+    */
+    void calcForceMultipliers(
+        const SimTK::State& s,
+        ForceMultipliersCV& multipliers) const;
+
+    /** Calculate muscle's force-multiplier values that are specific to this
+     * muscle .
+    @param s the state of the model
+    @return struct containing the multipliers
+    */
+    const ForceMultipliersCV& getForceMultipliers(
+        const SimTK::State& s) const;
+
     // Status flag returned by initMuscleState().
     enum StatusFromInitMuscleState {
         Success_Converged,
@@ -1108,6 +1127,17 @@ private:
         }
     };
 
+    /**
+     * Struct used for caching extra force multiplier values specific to this
+     * muscle.
+    */
+    struct ForceMultipliersCV {
+        double fiberCompressiveForceLengthMultiplier = SimTK::NaN;
+        double fiberCompressiveCosPennationMultiplier = SimTK::NaN;
+        double tendonForceLengthMultiplier = SimTK::NaN;
+    };
+
+    mutable CacheVariable<ForceMultipliersCV> _forceMultipliers;
 
 };    
 

@@ -46,13 +46,6 @@ const string Millard2012AccelerationMuscle::
     STATE_FIBER_VELOCITY_NAME = "fiber_velocity";
 ///@endcond  
 
-
-const static int MLIfse     = 0;
-const static int MLIfk      = 1;
-const static int MLIfcphi   = 2;
-const static int MLIfkPE    = 3;
-const static int MLIfcphiPE = 4;
-
 //=============================================================================
 // PROPERTY MANAGEMENT
 //=============================================================================
@@ -254,6 +247,11 @@ Millard2012AccelerationMuscle(const std::string &aName,  double aMaxIsometricFor
     addStateVariable(STATE_ACTIVATION_NAME);
     addStateVariable(STATE_FIBER_LENGTH_NAME);
     addStateVariable(STATE_FIBER_VELOCITY_NAME);
+
+    this->_forceMultipliers = addCacheVariable(
+        "_forceMultipliers",
+        Millard2012AccelerationMuscle::ForceMultipliersCV(),
+        SimTK::Stage::Position);
  }
 
 void Millard2012AccelerationMuscle::extendInitStateFromProperties(SimTK::State& s) const
@@ -362,6 +360,20 @@ double Millard2012AccelerationMuscle::
         fvi.calcFiberForceAlongTendon());
 }
 
+const Millard2012AccelerationMuscle::ForceMultipliersCV&
+Millard2012AccelerationMuscle::getForceMultipliers(const SimTK::State& s) const
+{
+    if (isCacheVariableValid(s, _forceMultipliers)) {
+        return getCacheVariableValue(s, _forceMultipliers);
+    }
+
+    ForceMultipliersCV& multipliers =
+        updCacheVariableValue(s, _forceMultipliers);
+    calcForceMultipliers(s, multipliers);
+    markCacheVariableValid(s, _forceMultipliers);
+    return multipliers;
+}
+
 //=============================================================================
 // STATE RELATED SET FUNCTIONS
 //=============================================================================
@@ -416,23 +428,20 @@ void Millard2012AccelerationMuscle::
 double Millard2012AccelerationMuscle::
     getFiberCompressiveForceLengthMultiplier(SimTK::State& s) const
 {
-    const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
-    return mli.userDefinedLengthExtras[MLIfk];
+    return getForceMultipliers(s).fiberCompressiveForceLengthMultiplier;
 }
 
 double Millard2012AccelerationMuscle::
     getFiberCompressiveForceCosPennationMultiplier(SimTK::State& s) const
 {
-    const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
-    return mli.userDefinedLengthExtras[MLIfcphi];
+    return getForceMultipliers(s).fiberCompressiveCosPennationMultiplier;
 }
 
 
 double Millard2012AccelerationMuscle::
     getTendonForceMultiplier(SimTK::State& s) const
 {
-    const MuscleLengthInfo& mli = getMuscleLengthInfo(s);
-    return mli.userDefinedLengthExtras[MLIfse];
+    return getForceMultipliers(s).tendonForceLengthMultiplier;
 }
 
 const MuscleFirstOrderActivationDynamicModel& Millard2012AccelerationMuscle::
@@ -785,14 +794,6 @@ void Millard2012AccelerationMuscle::
         std::string caller      = getName();
         caller.append(".calcMuscleLengthInfo");
 
-        //Get muscle model specific properties
-        const TendonForceLengthCurve& fseCurve = get_TendonForceLengthCurve(); 
-
-        const FiberCompressiveForceLengthCurve& fkCurve
-            = get_FiberCompressiveForceLengthCurve(); 
-        const FiberCompressiveForceCosPennationCurve& fcphiCurve
-            = get_FiberCompressiveForceCosPennationCurve(); 
-
         //Populate the output struct
         mli.fiberLength       = getStateVariableValue(s, STATE_FIBER_LENGTH_NAME); 
 
@@ -807,18 +808,6 @@ void Millard2012AccelerationMuscle::
                                                        mli.fiberLength,mclLength);
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength -  1.0;
-
-        double tendonForceLengthMultiplier=fseCurve.calcValue(mli.normTendonLength);
-
-        //Put in the additional length related terms that are specific to this
-        //particular muscle model.
-        mli.userDefinedLengthExtras.resize(5);
-
-        mli.userDefinedLengthExtras[MLIfse]     = tendonForceLengthMultiplier;
-        mli.userDefinedLengthExtras[MLIfk]      = fkCurve.calcValue(
-                                                    mli.normFiberLength);
-        mli.userDefinedLengthExtras[MLIfcphi]   = fcphiCurve.calcValue(
-                                                       mli.cosPennationAngle);
 
     }catch(const std::exception &x){
         std::string msg = "Exception caught in Millard2012AccelerationMuscle::" 
@@ -928,9 +917,12 @@ void Millard2012AccelerationMuscle::calcFiberVelocityInfo(
 
         double fal  = falCurve.calcValue(mli.normFiberLength);
         double fpe  = fpeCurve.calcValue(mli.normFiberLength);
-        double fse  = mli.userDefinedLengthExtras[MLIfse];
-        double fk   = mli.userDefinedLengthExtras[MLIfk];
-        double fcphi= mli.userDefinedLengthExtras[MLIfcphi];
+
+        // Get multipliers specific to this muscle.
+        const ForceMultipliersCV multipliers = getForceMultipliers(s);
+        double fse  = multipliers.tendonForceLengthMultiplier;
+        double fk   = multipliers.fiberCompressiveForceLengthMultiplier;
+        double fcphi= multipliers.fiberCompressiveCosPennationMultiplier;
 
         //2. Compute fv - but check for singularities first     
         const ForceVelocityCurve& fvCurve = get_ForceVelocityCurve(); 
@@ -1022,6 +1014,25 @@ void Millard2012AccelerationMuscle::calcFiberVelocityInfo(
         throw OpenSim::Exception(msg);
     }
     
+}
+
+void Millard2012AccelerationMuscle::calcForceMultipliers(
+    const SimTK::State& s,
+    Millard2012AccelerationMuscle::ForceMultipliersCV& multipliers) const
+{
+    const Muscle::MuscleLengthInfo& mli    = getMuscleLengthInfo(s);
+    const TendonForceLengthCurve& fseCurve = get_TendonForceLengthCurve();
+    const FiberCompressiveForceLengthCurve& fkCurve =
+        get_FiberCompressiveForceLengthCurve();
+    const FiberCompressiveForceCosPennationCurve& fcphiCurve =
+        get_FiberCompressiveForceCosPennationCurve();
+
+    multipliers.fiberCompressiveForceLengthMultiplier =
+        fcphiCurve.calcValue(mli.cosPennationAngle);
+    multipliers.fiberCompressiveForceLengthMultiplier =
+        fkCurve.calcValue(mli.normFiberLength);
+    multipliers.tendonForceLengthMultiplier =
+        fseCurve.calcValue(mli.tendonLength / get_tendon_slack_length());
 }
 
 //==============================================================================

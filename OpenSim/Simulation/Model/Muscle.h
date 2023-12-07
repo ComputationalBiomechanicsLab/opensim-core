@@ -524,14 +524,6 @@ protected:
           // 
          //  
         //     
-
-    [6] This vector is left for the muscle modeler to populate with any
-        computationally expensive quantities that are computed in 
-        calcMuscleLengthInfo, and required for use in the user defined functions 
-        calcFiberVelocityInfo and calcMuscleDynamicsInfo. None of the parent 
-        classes make any assumptions about what is or isn't in this field 
-        - use as necessary.
-       
     */
     struct MuscleLengthInfo{             //DIMENSION         Units      
         double fiberLength;              //length            m  
@@ -546,8 +538,6 @@ protected:
         double cosPennationAngle;        //NA                NA         
         double sinPennationAngle;        //NA                NA         
 
-        SimTK::Vector userDefinedLengthExtras;//NA        NA
-
         MuscleLengthInfo(): 
             fiberLength(SimTK::NaN), 
             fiberLengthAlongTendon(SimTK::NaN),
@@ -557,8 +547,8 @@ protected:
             tendonStrain(SimTK::NaN), 
             pennationAngle(SimTK::NaN), 
             cosPennationAngle(SimTK::NaN),
-            sinPennationAngle(SimTK::NaN),
-            userDefinedLengthExtras(0, SimTK::NaN){}
+            sinPennationAngle(SimTK::NaN)
+        {}
         friend std::ostream& operator<<(std::ostream& o, 
             const MuscleLengthInfo& mli) {
             o << "Muscle::MuscleLengthInfo should not be serialized!" 
