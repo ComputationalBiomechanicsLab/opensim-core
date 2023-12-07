@@ -292,6 +292,28 @@ void Millard2012AccelerationMuscle::
 }
 
 //=============================================================================
+// HELPER FUNCTIONS
+//=============================================================================
+
+namespace
+{
+
+double calcFiberAcceleration(
+    double mass,
+    double fiberLength,
+    double cosPennationAngle,
+    double pennationAngularVelocity,
+    double tendonForce,
+    double fiberForceAlongTendon)
+{
+    return (1 / mass) * (tendonForce - fiberForceAlongTendon) *
+               cosPennationAngle +
+           fiberLength * pennationAngularVelocity * pennationAngularVelocity;
+}
+
+} // namespace
+
+//=============================================================================
 // STATE RELATED GET FUNCTIONS
 //=============================================================================
 
@@ -330,15 +352,14 @@ double Millard2012AccelerationMuscle::
 double Millard2012AccelerationMuscle::
     getFiberAcceleration(const SimTK::State& s) const
 {
-    const double m = getMass();
-
     const FiberVelocityInfoCache& fvi = getFiberVelocityInfo(s);
-    const double FceAT  = fvi.calcFiberForceAlongTendon();
-    const double Fse    = fvi.tendonForce;
-    const double lce    = fvi.fiberLength;
-    const double cosphi = fvi.cosPennationAngle;
-    const double dphidt = fvi.calcPennationAngularVelocity();
-    return (1/m)*(Fse-FceAT)*cosphi + lce*dphidt*dphidt;
+    return calcFiberAcceleration(
+        getMass(),
+        fvi.fiberLength,
+        fvi.cosPennationAngle,
+        fvi.calcPennationAngularVelocity(),
+        fvi.tendonForce,
+        fvi.calcFiberForceAlongTendon());
 }
 
 //=============================================================================
