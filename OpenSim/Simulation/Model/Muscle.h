@@ -570,69 +570,43 @@ protected:
         of the muscle path, and any forces the muscle experiences will not be 
         known.
 
-            NAME                     DIMENSION             UNITS
-             fiberVelocity             length/time           m/s
-             fiberVelocityAlongTendon  length/time           m/s       [1]
-             normFiberVelocity         (length/time)/Vmax    NA        [2]
-             
-             pennationAngularVelocity  angle/time            rad/s     [3]
-             
-             tendonVelocity            length/time           m/s       
-             normTendonVelocity        (length/time)/length  (m/s)/m   [4]
-             
-             fiberPassiveForceLengthMultiplier   force/force     N/N      [5]
-             fiberActiveForceLengthMultiplier    force/force     N/N      [6]
-             fiberForceVelocityMultiplier force/force          NA        [7]
+            NAME                               DIMENSION        UNITS
+             fiberVelocity                     length/time      m/s
+             tendonVelocity                    length/time      m/s
 
-             activation                  NA                   NA     [8]
+             fiberPassiveForceLengthMultiplier force/force      N/N     [1]
+             fiberActiveForceLengthMultiplier  force/force      N/N     [2]
+             fiberForceVelocityMultiplier      force/force      NA      [3]
 
-             fiberForce                  force                N
-             fiberForceAlongTendon       force                N      [9]
-             normFiberForce              force/force          N/N    [10]
-             activeFiberForce            force                N      [11]
-             passiveFiberForce           force                N      [12]
+             activation                        NA               NA      [4]
 
-             tendonForce                 force                N
-             normTendonForce             force/force          N/N    [13]
+             fiberForce                        force            N
+             activeFiberForce                  force            N       [5]
+             passiveElasticFiberForce          force            N       [6]
+             passiveDampingFiberForce          force            N       [7]
 
-             fiberStiffness              force/length         N/m    [14]
-             fiberStiffnessAlongTendon   force/length         N/m    [15]
-             tendonStiffness             force/length         N/m    [16]
-             muscleStiffness             force/length         N/m    [17]
+             tendonForce                       force            N
 
-             fiberActivePower            force*velocity       W (N*m/s)
-             fiberPassivePower           force*velocity       W (N*m/s)
-             tendonPower                 force*velocity       W (N*m/s)
-             musclePower                 force*velocity       W (N*m/s)
+             fiberStiffness                    force/length     N/m     [8]
+             tendonStiffness                   force/length     N/m     [9]
 
-             userDefinedVelocityExtras    NA                   NA      [18]
-        
-        [1] fiberVelocityAlongTendon is the first derivative of the symbolic
-            equation that defines the fiberLengthAlongTendon.
-
-        [2] normFiberVelocity is the fiberVelocity (in m/s) divided by  
+        [1] normFiberVelocity is the fiberVelocity (in m/s) divided by
             the optimal length of the fiber (in m) and by the maximum fiber
             velocity (in optimal-fiber-lengths/s). normFiberVelocity has
             units of 1/optimal-fiber-length.
 
-        [3] The sign of the angular velocity is defined using the right 
-            hand rule.
-
-        [4] normTendonVelocity is the tendonVelocity (the lengthening velocity 
-            of the tendon) divided by its resting length
-
-        [6] The fiberPassiveForceLengthMultiplier represents the elastic force the fiber
+        [2] The fiberPassiveForceLengthMultiplier represents the elastic force the fiber
             generates normalized w.r.t. the maximum isometric force of the fiber.
             Is typically specified by a passiveForceLengthCurve.
 
-        [7] The fiberActiveForceLengthMultiplier is the scaling of the maximum force a fiber
+        [3] The fiberActiveForceLengthMultiplier is the scaling of the maximum force a fiber
             can generate as a function of its length. This term usually follows a
             curve that is zero at a normalized fiber length of 0.5, is 1 at a
             normalized fiber length of 1, and then zero again at a normalized fiber
             length of 1.5. This curve is generally an interpolation of experimental
             data.
 
-        [5] The fiberForceVelocityMultiplier is the scaling factor that represents
+        [4] The fiberForceVelocityMultiplier is the scaling factor that represents
             how a muscle fiber's force generating capacity is modulated by the
             contraction (concentric or eccentric) velocity of the fiber.
             Generally this curve has a value of 1 at a fiber velocity of 0, 
@@ -641,59 +615,22 @@ protected:
             velocity. The force velocity curve, which computes this term,  
             is usually an interpolation of an experimental curve.
 
-        [6] This vector is left for the muscle modeler to populate with any
-            computationally expensive quantities that are computed in 
-            calcFiberVelocityInfo, and required for use in the user defined 
-            function calcMuscleDynamicsInfo. None of the parent classes make 
-            any assumptions about what is or isn't in this field
-            - use as necessary.
-
-        [6] This is a quantity that ranges between 0 and 1 that dictates how
+        [5] This is a quantity that ranges between 0 and 1 that dictates how
             on or activated a muscle is. This term may or may not have its own
             time dependent behavior depending on the muscle model.
 
-        [7] fiberForceAlongTendon is the fraction of the force that is developed
-            by the fiber that is transmitted to the tendon. This fraction 
-            depends on the pennation model that is used for the muscle model
-
-        [8] This is the force developed by the fiber scaled by the maximum 
-            isometric contraction force. Note that the maximum isometric force
-            is defined as the maximum isometric force a muscle fiber develops
-            at its optimal pennation angle, and along the line of the fiber.
-
-        [9] This is the portion of the fiber force that is created as a direct
+        [6] This is the portion of the fiber force that is created as a direct
             consequence of the value of 'activation'.
 
-        [10] This is the portion of the fiber force that is created by the 
+        [7] This is the portion of the fiber force that is created by the
             parallel elastic element within the fiber.
-    
-        [11] This is the tendonForce normalized by the maximum isometric 
-            contraction force
 
-        [12] fiberStiffness is defined as the partial derivative of fiber force
+        [8] fiberStiffness is defined as the partial derivative of fiber force
             with respect to fiber length
 
-        [13] fiberStiffnessAlongTendon is defined as the partial derivative of 
-            fiber force along the tendon with respect to small changes in
-            the fiber length along the tendon. This quantity is normally 
-            computed using the equations for fiberStiffness, and then using an 
-            application of the chain rule to yield fiberStiffnessAlongTendon.
-
-        [14] tendonStiffness is defined as the partial derivative of tendon
+        [9] tendonStiffness is defined as the partial derivative of tendon
             force with respect to tendon length
 
-        [15] muscleStiffness is defined as the partial derivative of muscle force
-            with respect to changes in muscle length. This quantity can usually
-            be computed by noting that the tendon and the fiber are in series,
-            with the fiber at a pennation angle. Thus
-
-            Kmuscle =   (Kfiber_along_tendon * Ktendon)
-                       /(Kfiber_along_tendon + Ktendon) 
-
-        [16] This vector is left for the muscle modeler to populate with any
-             computationally expensive quantities that might be of interest 
-             after dynamics calculations are completed but maybe of use
-             in computing muscle derivatives or reporting values of interest.
 
     */
     struct FiberVelocityInfo {              //DIMENSION             UNITS
@@ -740,12 +677,21 @@ protected:
     struct FiberVelocityInfoCache : MuscleLengthInfo,
                                     FiberVelocityInfo
     {
+
+        /**
+            Computes the pennation angular velocity, with the sign defined
+            using the right hand rule.
+        */
         double calcPennationAngularVelocity() const
         {
             return -(fiberVelocity / fiberLength) * sinPennationAngle /
                    cosPennationAngle;
         }
 
+        /**
+            fiberVelocityAlongTendon is the first derivative of the symbolic
+            equation that defines the fiberLengthAlongTendon.
+         */
         double calcFiberVelocityAlongTendon() const
         {
             return fiberVelocity * cosPennationAngle -
@@ -762,6 +708,13 @@ protected:
             return passiveElasticFiberForce + passiveDampingFiberForce;
         }
 
+
+        /**
+            fiberForceAlongTendon is the fraction of the force that is
+            developed by the fiber that is transmitted to the tendon. This
+            fraction depends on the pennation model that is used for the muscle
+            model
+        */
         double calcFiberForceAlongTendon() const
         {
             return fiberForce * cosPennationAngle;
@@ -782,6 +735,11 @@ protected:
             return passiveDampingFiberForce * cosPennationAngle;
         }
 
+        /**
+            FiberStiffnessAlongTendon is defined as the partial derivative of
+            fiber force along the tendon with respect to small changes in the
+            fiber length along the tendon.
+        */
         double calcFiberStiffnessAlongTendon() const
         {
             double DcosPhi_Dlce =
@@ -792,6 +750,15 @@ protected:
             return DfmAT_Dlce * Dlce_DlceAT;
         }
 
+        /**
+            Musclestiffness is defined as the partial derivative of muscle
+            force with respect to changes in muscle length. Noting that the
+            tendon and the fiber are in series, with the fiber at a pennation
+            angle, we have:
+
+            Kmuscle = (Kfiber_along_tendon * Ktendon)
+                        / (Kfiber_along_tendon + Ktendon)
+        */
         double calcMuscleStiffness(bool ignoreTendonCompliance) const
         {
             double fiber_stiffness_along_tendon =
