@@ -715,8 +715,6 @@ protected:
         double fiberStiffness;          // force/length         N/m
         double tendonStiffness;         // force/length         N/m
 
-        SimTK::Vector userDefinedVelocityExtras;//NA                  NA
-
         FiberVelocityInfo(): 
             fiberVelocity(SimTK::NaN), 
             fiberPassiveForceLengthMultiplier(SimTK::NaN),
@@ -729,8 +727,8 @@ protected:
             passiveDampingFiberForce(SimTK::NaN),
             tendonForce(SimTK::NaN),
             fiberStiffness(SimTK::NaN),
-            tendonStiffness(SimTK::NaN),
-            userDefinedVelocityExtras(0, SimTK::NaN){};
+            tendonStiffness(SimTK::NaN)
+        {}
         friend std::ostream& operator<<(std::ostream& o, 
             const FiberVelocityInfo& fvi) {
             o << "Muscle::FiberVelocityInfo should not be serialized!"
