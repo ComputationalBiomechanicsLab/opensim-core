@@ -407,6 +407,7 @@ void Millard2012AccelerationMuscle::
 {
     setStateVariableValue(s, STATE_FIBER_LENGTH_NAME, fiberLength);
     markCacheVariableInvalid(s, _lengthInfoCV);
+    markCacheVariableInvalid(s, _forceMultipliersCV);
     markCacheVariableInvalid(s, _velInfoCV);
     
 }
