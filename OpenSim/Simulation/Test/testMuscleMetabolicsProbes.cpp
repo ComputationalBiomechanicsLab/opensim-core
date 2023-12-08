@@ -146,7 +146,6 @@ public:
         setStateVariableValue(s, stateName_fiberLength, fiberLength);
         markCacheVariableInvalid(s, _lengthInfoCV);
         markCacheVariableInvalid(s, _velInfoCV);
-        markCacheVariableInvalid(s, _dynamicsInfoCV);
     }
 
     void setNormFiberVelocity(SimTK::State& s, double normFiberVelocity) const
@@ -154,7 +153,6 @@ public:
         setStateVariableValue(s, stateName_fiberVelocity, normFiberVelocity *
                          getMaxContractionVelocity() * getOptimalFiberLength());
         markCacheVariableInvalid(s, _velInfoCV);
-        markCacheVariableInvalid(s, _dynamicsInfoCV);
     }
 
     //--------------------------------------------------------------------------
@@ -213,9 +211,9 @@ public:
 
     double computeActuation(const SimTK::State& s) const override
     {
-        const MuscleDynamicsInfo& mdi = getMuscleDynamicsInfo(s);
-        setActuation(s, mdi.tendonForce);
-        return mdi.tendonForce;
+        const double tendonForce = getFiberVelocityInfo(s).tendonForce;
+        setActuation(s, tendonForce);
+        return tendonForce;
     }
 
     // Calculate position-level variables.
@@ -231,82 +229,64 @@ public:
         mli.pennationAngle         = 0;
         mli.cosPennationAngle      = 1;
         mli.sinPennationAngle      = 0;
-        mli.fiberPassiveForceLengthMultiplier = 0;
+    }
+
+    // Calculate velocity-level variables.
+    void calcFiberVelocityInfo(
+            const SimTK::State& s,
+            const MuscleLengthInfo& mli,
+            FiberVelocityInfo& fvi)
+        const override
+    {
+        fvi.fiberVelocity = getStateVariableValue(s, stateName_fiberVelocity);
 
         // The fiberActiveForceLengthMultiplier (referred to as 'Fisom' in [3])
         // is the proportion of maxIsometricForce that would be delivered
         // isometrically at maximal activation. Fisom=1 if Lce=Lceopt.
         if (mli.fiberLength < (1 - get_width()) * getOptimalFiberLength() ||
             mli.fiberLength > (1 + get_width()) * getOptimalFiberLength())
-            mli.fiberActiveForceLengthMultiplier = 0;
+            fvi.fiberActiveForceLengthMultiplier = 0;
         else {
             double c  = -1.0 / (get_width() * get_width());
             double t1 = mli.fiberLength / getOptimalFiberLength();
-            mli.fiberActiveForceLengthMultiplier = c*t1*(t1-2) + c + 1;
+            fvi.fiberActiveForceLengthMultiplier = c*t1*(t1-2) + c + 1;
         }
-    }
 
-    // Calculate velocity-level variables.
-    void calcFiberVelocityInfo(const SimTK::State& s, FiberVelocityInfo& fvi)
-        const override
-    {
-        fvi.fiberVelocity = getStateVariableValue(s, stateName_fiberVelocity);
-        fvi.fiberVelocityAlongTendon = fvi.fiberVelocity;
-        fvi.normFiberVelocity        = fvi.fiberVelocity /
-                        (getMaxContractionVelocity() * getOptimalFiberLength());
+        fvi.fiberForceVelocityMultiplier      = 1;
+        fvi.fiberPassiveForceLengthMultiplier = 0;
 
-        fvi.pennationAngularVelocity     = 0;
-        fvi.tendonVelocity               = 0;
-        fvi.normTendonVelocity           = 0;
-        fvi.fiberForceVelocityMultiplier = 1;
-    }
-
-    // Calculate dynamics-level variables.
-    void calcMuscleDynamicsInfo(const SimTK::State& s, MuscleDynamicsInfo& mdi)
-        const override
-    {
         #ifdef USE_ACTIVATION_DYNAMICS_MODEL
-        mdi.activation =
+        fvi.activation =
             get_ZerothOrderMuscleActivationDynamics().getActivation(s);
         #else
-        mdi.activation = getExcitation(s);
+        fvi.activation = getExcitation(s);
         #endif
 
         // These expressions were obtained by solving the 'Vce' equations in [3]
         // for force F, then applying the modifications described in [1].
         // Negative fiber velocity corresponds to concentric contraction.
-        double ArelStar = pow(mdi.activation,-0.3) * get_Arel();
-        if (getFiberVelocity(s) <= 0) {
-            double v  = max(getFiberVelocity(s),
+        double ArelStar = pow(fvi.activation,-0.3) * get_Arel();
+        if (fvi.fiberVelocity <= 0) {
+            double v  = max(fvi.fiberVelocity,
                         -getMaxContractionVelocity() * getOptimalFiberLength());
             double t1 = get_Brel() * getOptimalFiberLength();
-            mdi.fiberForce = (t1*getActiveForceLengthMultiplier(s) + ArelStar*v)
+            fvi.fiberForce = (t1*fvi.fiberActiveForceLengthMultiplier + ArelStar*v)
                              / (t1 - v);
         } else {
-            double c2 = -get_FmaxEccentric() / mdi.activation;
-            double c3 = (get_FmaxEccentric()-1) * get_Brel() / (mdi.activation *
-                            2 * (getActiveForceLengthMultiplier(s) + ArelStar));
-            double c1 = (get_FmaxEccentric()-1) * c3 / mdi.activation;
-            mdi.fiberForce = -(getOptimalFiberLength() * (c1 + c2*c3)
-                               + c2*getFiberVelocity(s)) /
-                             (getFiberVelocity(s) + c3*getOptimalFiberLength());
+            double c2 = -get_FmaxEccentric() / fvi.activation;
+            double c3 = (get_FmaxEccentric()-1) * get_Brel() / (fvi.activation *
+                            2 * (fvi.fiberActiveForceLengthMultiplier + ArelStar));
+            double c1 = (get_FmaxEccentric()-1) * c3 / fvi.activation;
+            fvi.fiberForce = -(getOptimalFiberLength() * (c1 + c2*c3)
+                               + c2*fvi.fiberVelocity) /
+                             (fvi.fiberVelocity + c3*getOptimalFiberLength());
         }
-        mdi.fiberForce *= getMaxIsometricForce() * mdi.activation;
+        fvi.fiberForce *= getMaxIsometricForce() * fvi.activation;
 
-        mdi.fiberForceAlongTendon = mdi.fiberForce;
-        mdi.normFiberForce        = mdi.fiberForce / getMaxIsometricForce();
-        mdi.activeFiberForce      = mdi.fiberForce;
-        mdi.passiveFiberForce     = 0;
-        mdi.tendonForce           = mdi.fiberForce;
-        mdi.normTendonForce       = mdi.normFiberForce;
-        mdi.fiberStiffness        = 0;
-        mdi.fiberStiffnessAlongTendon = 0;
-        mdi.tendonStiffness       = 0;
-        mdi.muscleStiffness       = 0;
-        mdi.fiberActivePower      = 0;
-        mdi.fiberPassivePower     = 0;
-        mdi.tendonPower           = 0;
-        mdi.musclePower           = 0;
+        fvi.activeFiberForce      = fvi.fiberForce;
+        fvi.tendonForce           = fvi.fiberForce;
+        fvi.fiberStiffness        = 0;
+        fvi.tendonStiffness       = 0;
     }
 
 private:

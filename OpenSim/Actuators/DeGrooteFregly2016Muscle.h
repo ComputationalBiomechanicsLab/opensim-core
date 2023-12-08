@@ -187,7 +187,7 @@ public:
     /// If ignore_activation_dynamics is true, this gets excitation instead.
     double getActivation(const SimTK::State& s) const override {
         // We override the Muscle's implementation because Muscle requires
-        // realizing to Dynamics to access activation from MuscleDynamicsInfo,
+        // realizing to Dynamics to access activation from MuscleVelocityInfo,
         // which is unnecessary if the activation is a state.
         if (get_ignore_activation_dynamics()) {
             return getControl(s);
@@ -206,7 +206,6 @@ public:
             setStateVariableValue(s, STATE_ACTIVATION_NAME, activation);
         }
         markCacheVariableInvalid(s, "velInfo");
-        markCacheVariableInvalid(s, "dynamicsInfo");
     }
 
 protected:
@@ -215,9 +214,9 @@ protected:
     void calcMuscleLengthInfo(
             const SimTK::State& s, MuscleLengthInfo& mli) const override;
     void calcFiberVelocityInfo(
-            const SimTK::State& s, FiberVelocityInfo& fvi) const override;
-    void calcMuscleDynamicsInfo(
-            const SimTK::State& s, MuscleDynamicsInfo& mdi) const override;
+            const SimTK::State& s,
+            const MuscleLengthInfo& mli,
+            FiberVelocityInfo& fvi) const override;
     void calcMusclePotentialEnergyInfo(const SimTK::State& s,
             MusclePotentialEnergyInfo& mpei) const override;
 
@@ -362,7 +361,6 @@ public:
                     s, STATE_NORMALIZED_TENDON_FORCE_NAME, normTendonForce);
             markCacheVariableInvalid(s, "lengthInfo");
             markCacheVariableInvalid(s, "velInfo");
-            markCacheVariableInvalid(s, "dynamicsInfo");
         }
     }
     /// @}
@@ -710,18 +708,15 @@ public:
             const SimTK::Real& activation, const SimTK::Real& normTendonForce,
             const SimTK::Real& normTendonForceDerivative) const {
 
-        MuscleLengthInfo mli;
-        FiberVelocityInfo fvi;
-        MuscleDynamicsInfo mdi;
+        FiberVelocityInfoCache fvi;
+        MuscleLengthInfo& mli = fvi;
         calcMuscleLengthInfoHelper(
                 muscleTendonLength, false, mli, normTendonForce);
         calcFiberVelocityInfoHelper(muscleTendonVelocity, activation, false,
                 false, mli, fvi, normTendonForce, normTendonForceDerivative);
-        calcMuscleDynamicsInfoHelper(activation, muscleTendonVelocity, false,
-                mli, fvi, mdi, normTendonForce);
 
-        return mdi.normTendonForce -
-               mdi.fiberForceAlongTendon / get_max_isometric_force();
+        return (fvi.tendonForce - fvi.calcFiberForceAlongTendon())
+            / get_max_isometric_force();
     }
 
     /// The residual (i.e. error) in the time derivative of the linearized
@@ -738,20 +733,17 @@ public:
             const SimTK::Real& activation, const SimTK::Real& normTendonForce,
             const SimTK::Real& normTendonForceDerivative) const {
 
-        MuscleLengthInfo mli;
-        FiberVelocityInfo fvi;
-        MuscleDynamicsInfo mdi;
+        FiberVelocityInfoCache fvi;
+        MuscleLengthInfo& mli = fvi;
         calcMuscleLengthInfoHelper(
                 muscleTendonLength, false, mli, normTendonForce);
         calcFiberVelocityInfoHelper(muscleTendonVelocity, activation, false,
                 m_isTendonDynamicsExplicit, mli, fvi, normTendonForce,
                 normTendonForceDerivative);
-        calcMuscleDynamicsInfoHelper(activation, muscleTendonVelocity, false,
-                mli, fvi, mdi, normTendonForce);
 
-        return mdi.fiberStiffnessAlongTendon * fvi.fiberVelocityAlongTendon -
-               mdi.tendonStiffness *
-                       (muscleTendonVelocity - fvi.fiberVelocityAlongTendon);
+        return fvi.calcFiberStiffnessAlongTendon() * fvi.calcFiberVelocityAlongTendon() -
+               fvi.tendonStiffness *
+                       (muscleTendonVelocity - fvi.calcFiberVelocityAlongTendon());
     }
     /// @}
 
@@ -821,11 +813,6 @@ private:
             const MuscleLengthInfo& mli, FiberVelocityInfo& fvi,
             const SimTK::Real& normTendonForce = SimTK::NaN,
             const SimTK::Real& normTendonForceDerivative = SimTK::NaN) const;
-    void calcMuscleDynamicsInfoHelper(const SimTK::Real& activation,
-            const SimTK::Real& muscleTendonVelocity,
-            const bool& ignoreTendonCompliance, const MuscleLengthInfo& mli,
-            const FiberVelocityInfo& fvi, MuscleDynamicsInfo& mdi,
-            const SimTK::Real& normTendonForce = SimTK::NaN) const;
     void calcMusclePotentialEnergyInfoHelper(const bool& ignoreTendonCompliance,
             const MuscleLengthInfo& mli, MusclePotentialEnergyInfo& mpei) const;
 
@@ -949,14 +936,6 @@ private:
     // kT, users specify tendon strain at 1 norm force, which is more intuitive.
     SimTK::Real m_kT = SimTK::NaN;
     bool m_isTendonDynamicsExplicit = true;
-
-    // Indices for MuscleDynamicsInfo::userDefinedDynamicsExtras.
-    constexpr static int m_mdi_passiveFiberElasticForce = 0;
-    constexpr static int m_mdi_passiveFiberDampingForce = 1;
-    constexpr static int m_mdi_partialPennationAnglePartialFiberLength = 2;
-    constexpr static int m_mdi_partialFiberForceAlongTendonPartialFiberLength =
-            3;
-    constexpr static int m_mdi_partialTendonForcePartialFiberLength = 4;
 };
 
 } // namespace OpenSim

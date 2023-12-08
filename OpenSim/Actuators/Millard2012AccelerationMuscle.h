@@ -640,8 +640,8 @@ public:
         
 ///@cond DEPRECATED
     /*  Once the ignore_tendon_compliance flag is implemented correctly get rid 
-        of this method as it duplicates code in calcMuscleLengthInfo,
-        calcFiberVelocityInfo, and calcMuscleDynamicsInfo
+        of this method as it duplicates code in calcMuscleLengthInfo and
+        calcFiberVelocityInfo.
     */
     double calcInextensibleTendonActiveFiberForce(SimTK::State& s, 
                                        double aActivation) const override final;
@@ -693,18 +693,9 @@ protected:
                about the muscle that is available at the velocity stage
 
     */
-    void calcFiberVelocityInfo(const SimTK::State& s, 
-                               FiberVelocityInfo& fvi) const override final;
-
-    /** calculate muscle's active and passive force-length, force-velocity, 
-        tendon force, relationships and their related values 
-    @param s the state of the model
-    @param mdi the muscle dynamics info struct that will hold updated 
-            information about the muscle that is available at the dynamics stage    
-    */
-    void calcMuscleDynamicsInfo(const SimTK::State& s, 
-                                 MuscleDynamicsInfo& mdi) const override final;
-
+    void calcFiberVelocityInfo(const SimTK::State& s,
+                               const MuscleLengthInfo& mli,
+                               FiberVelocityInfo& fvi) const override;
 
     void calcMusclePotentialEnergyInfo(const SimTK::State& s,
         MusclePotentialEnergyInfo& mpei) const override final;
@@ -904,6 +895,25 @@ private:
     double calc_DTendonForce_DFiberLength(double dFse_dtl,
                                           const AccelerationMuscleInfo& ami,
                                           std::string& caller) const;
+
+    struct ForceMultipliersCV;
+
+    /** Calculate muscle's force-multiplier values that are specific to this
+     * muscle .
+    @param s the state of the model
+    @param multipliers struct holding the computed multipliers
+    */
+    void calcForceMultipliers(
+        const SimTK::State& s,
+        ForceMultipliersCV& multipliers) const;
+
+    /** Calculate muscle's force-multiplier values that are specific to this
+     * muscle .
+    @param s the state of the model
+    @return struct containing the multipliers
+    */
+    const ForceMultipliersCV& getForceMultipliers(
+        const SimTK::State& s) const;
 
     // Status flag returned by initMuscleState().
     enum StatusFromInitMuscleState {
@@ -1117,6 +1127,17 @@ private:
         }
     };
 
+    /**
+     * Struct used for caching extra force multiplier values specific to this
+     * muscle.
+    */
+    struct ForceMultipliersCV {
+        double fiberCompressiveForceLengthMultiplier = SimTK::NaN;
+        double fiberCompressiveCosPennationMultiplier = SimTK::NaN;
+        double tendonForceLengthMultiplier = SimTK::NaN;
+    };
+
+    mutable CacheVariable<ForceMultipliersCV> _forceMultipliersCV;
 
 };    
 

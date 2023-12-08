@@ -447,8 +447,8 @@ public:
 //==============================================================================
     ///@cond DEPRECATED
     /*  Once the ignore_tendon_compliance flag is implemented correctly, get rid
-    of this method as it duplicates code in calcMuscleLengthInfo,
-    calcFiberVelocityInfo, and calcMuscleDynamicsInfo.
+    of this method as it duplicates code in calcMuscleLengthInfo and
+    calcFiberVelocityInfo.
         @param activation of the muscle [0-1]
         @param fiberLength in (m)
         @param fiberVelocity in (m/s)
@@ -521,15 +521,8 @@ protected:
     (fiber and tendon velocities, normalized velocities, pennation angular
     velocity, etc.). */
     void calcFiberVelocityInfo(const SimTK::State& s,
+                               const MuscleLengthInfo& mli,
                                FiberVelocityInfo& fvi) const override;
-
-    /** Calculate the dynamics-related values associated with the muscle state
-    (from the active- and passive-force-length curves, the force-velocity curve,
-    and the tendon-force-length curve). The last entry is a SimTK::Vector
-    containing the passive conservative (elastic) fiber force and the passive
-    non-conservative (damping) fiber force. */
-    void calcMuscleDynamicsInfo(const SimTK::State& s,
-                                MuscleDynamicsInfo& mdi) const override;
 
     /** Calculate the potential energy values associated with the muscle */
     void  calcMusclePotentialEnergyInfo(const SimTK::State& s, 

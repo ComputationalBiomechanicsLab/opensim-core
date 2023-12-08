@@ -196,6 +196,12 @@ void Thelen2003Muscle::constructProperties()
 //=============================================================================
 // GET
 //=============================================================================
+double Thelen2003Muscle::getActivation(const SimTK::State& s) const
+{
+    return getActivationModel().clampActivation(getStateVariableValue(
+                s,
+                STATE_ACTIVATION_PATH));
+}
 double Thelen2003Muscle::getActivationTimeConstant() const
 {   return get_activation_time_constant(); }
 
@@ -324,9 +330,9 @@ double Thelen2003Muscle::
 
 double  Thelen2003Muscle::computeActuation(const SimTK::State& s) const
 {
-    const MuscleDynamicsInfo& mdi = getMuscleDynamicsInfo(s);
-    setActuation(s, mdi.tendonForce);
-    return( mdi.tendonForce );
+    const double tendonForce = getFiberVelocityInfo(s).tendonForce;
+    setActuation(s, tendonForce);
+    return tendonForce;
 }
 
 void Thelen2003Muscle::computeInitialFiberEquilibrium(SimTK::State& s) const
@@ -404,11 +410,6 @@ void Thelen2003Muscle::calcMuscleLengthInfo(const SimTK::State& s,
                                     mli.fiberLength,mclLength );
         mli.normTendonLength  = mli.tendonLength / tendonSlackLen;
         mli.tendonStrain      = mli.normTendonLength -  1.0;
-        
-
-    
-        mli.fiberPassiveForceLengthMultiplier= calcfpe(mli.normFiberLength);
-        mli.fiberActiveForceLengthMultiplier = calcfal(mli.normFiberLength);
     }catch(const std::exception &x){
         std::string msg = "Exception caught in Thelen2003Muscle::" 
                           "calcMuscleLengthInfo\n"                 
@@ -439,17 +440,19 @@ void Thelen2003Muscle::calcMusclePotentialEnergyInfo(const SimTK::State& s,
 }
 
 
-void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s, 
-                                               FiberVelocityInfo& fvi) const
+void Thelen2003Muscle::calcFiberVelocityInfo(
+    const SimTK::State& s,
+    const MuscleLengthInfo& mli,
+    FiberVelocityInfo& fvi) const
 {
     try{
-        //Get the quantities that we've already computed
-            const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
-
         //Get the static properties of this muscle
             // double mclLength      = getLength(s);
             double tendonSlackLen = getTendonSlackLength();
             double optFiberLen    = getOptimalFiberLength();
+        double fiso      = getMaxIsometricForce();
+        double penHeight = getPennationModel().getParallelogramHeight();
+
         //=========================================================================
         // Compute fv by inverting the force-velocity relationship in the 
         // equilibrium equations
@@ -458,8 +461,7 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         //1. Get fiber/tendon kinematic information
 
         //clamp activation to a legal range
-        double a = getActivationModel().clampActivation(getStateVariableValue(s,
-                                          STATE_ACTIVATION_PATH));
+        double a = getActivation(s);
    
 
         double lce  = mli.fiberLength;   
@@ -495,14 +497,12 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
     
             //Check for singularity conditions, and clamp output appropriately
 
-        double dmcldt = getLengtheningSpeed(s);
-
         //default values that are appropriate when fiber length has been clamped
         //to its minimum allowable value.
 
-        double fse  = calcfse(tl/tendonSlackLen);    
-        double fal  = mli.fiberActiveForceLengthMultiplier;
-        double fpe  = mli.fiberPassiveForceLengthMultiplier;
+        double fse  = calcfse(tl/tendonSlackLen);
+        double fal  = calcfal(mli.normFiberLength);
+        double fpe  = calcfpe(mli.normFiberLength);
 
         double afalfv = ((fse/cosphi)-fpe); //we can do this without fear of
                                               //a singularity because fiber length
@@ -510,43 +510,52 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         double fv     = afalfv/(a*fal);
         double dlceN  = calcdlceN(a,fal,afalfv);
         double dlce   = dlceN*getMaxContractionVelocity()*optFiberLen;
-        double tanPhi = tan(phi);
-        double dphidt = getPennationModel().calcPennationAngularVelocity(
-                                            tanPhi,lce,dlce);
-        double dlceAT = getPennationModel().calcFiberVelocityAlongTendon(
-                            lce, dlce, sinphi, cosphi, dphidt);
-        double dtl    = getPennationModel().calcTendonVelocity(
-                            cosphi, sinphi, dphidt, lce, dlce, dmcldt);
-    
-    
         //Switching condition: if the fiber is clamped and the tendon and the 
         //                   : fiber are out of equilibrium
         double fiberStateClamped = 0.0;
         if(isFiberStateClamped(s,dlceN)){
              dlce = 0;
-             dlceAT = 0;
              dlceN = 0;
-             dphidt = 0;
-             dtl = dmcldt;
              fv = 1.0;
              fiberStateClamped = 1.0;
         }
 
         //Populate the struct;
         fvi.fiberVelocity               = dlce;
-        fvi.fiberVelocityAlongTendon    = dlceAT;
-        fvi.normFiberVelocity           = dlceN;
-
-        fvi.pennationAngularVelocity    = dphidt;
-
-        fvi.tendonVelocity              = dtl;
-        fvi.normTendonVelocity          = dtl/getTendonSlackLength();
 
         fvi.fiberForceVelocityMultiplier = fv;
+        fvi.fiberPassiveForceLengthMultiplier = fpe;
+        fvi.fiberActiveForceLengthMultiplier = fal;
 
-        fvi.userDefinedVelocityExtras.resize(2);
-        fvi.userDefinedVelocityExtras[0]=fse;
-        fvi.userDefinedVelocityExtras[1]=fiberStateClamped;
+        //=========================================================================
+        // Compute force related quantities.
+        //=========================================================================
+
+        //Default values appropriate when the fiber is clamped to its minimum length
+        //and is generating no force
+        double aFm          = 0; //active fiber force
+        double Fm           = 0;
+        double dFm_dlce     = 0;
+        double dFt_dtl      = 0; 
+
+        if(fiberStateClamped < 0.5){        
+            aFm          = calcActiveFm(a,fal,fv,fiso);
+            Fm           = calcFm(a,fal,fv,fpe,fiso);
+            dFm_dlce     = calcDFmDlce(lce,a,fv,fiso,optFiberLen);
+
+            dFt_dtl = calcDFseDtl(tl, fiso, tendonSlackLen);
+        }
+
+        fvi.activation                   = a;
+        fvi.fiberForce                   = Fm; 
+        fvi.activeFiberForce             = aFm;
+        fvi.passiveElasticFiberForce     = fpe*fiso;
+        fvi.passiveDampingFiberForce     = 0.;
+
+        fvi.tendonForce                  = fse*fiso;
+
+        fvi.fiberStiffness               = dFm_dlce;
+        fvi.tendonStiffness              = dFt_dtl;
     }
     catch(const std::exception &x){
         std::string msg = "Exception caught in Thelen2003Muscle::" 
@@ -561,120 +570,6 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
 //=======================================
 // computeFiberVelocityInfo helper functions
 //=======================================
-
-void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s, 
-                                               MuscleDynamicsInfo& mdi) const
-{
-    try {
-        //Get the quantities that we've already computed
-        const MuscleLengthInfo &mli = getMuscleLengthInfo(s);
-        const FiberVelocityInfo &mvi = getFiberVelocityInfo(s);
-        //Get the static properties of this muscle
-        // double mclLength      = getLength(s);
-        double tendonSlackLen = getTendonSlackLength();
-        double optFiberLen    = getOptimalFiberLength();
-        double fiso           = getMaxIsometricForce();
-        double penHeight      = getPennationModel().getParallelogramHeight();
-
-        //=========================================================================
-        // Compute required quantities
-        //=========================================================================
-        //1. Get fiber/tendon kinematic information
-        double a = getActivationModel().clampActivation(
-                       getStateVariableValue(s, STATE_ACTIVATION_PATH) );
-
-        double lce      = mli.fiberLength;
-        double fiberStateClamped = mvi.userDefinedVelocityExtras[1];
-        double dlce     = mvi.fiberVelocity;
-        double phi      = mli.pennationAngle;
-        double cosphi   = mli.cosPennationAngle;
-        // double sinphi   = mli.sinPennationAngle;
-
-        double tl   = mli.tendonLength; 
-        double dtl  = mvi.tendonVelocity;
-        // double tlN  = mli.normTendonLength;
-
-        //Default values appropriate when the fiber is clamped to its minimum length
-        //and is generating no force
-
-        //These quantities should already be set to legal values from
-        //calcFiberVelocityInfo
-        double fal  = mli.fiberActiveForceLengthMultiplier;
-        double fpe  = mli.fiberPassiveForceLengthMultiplier;
-        double fv   = mvi.fiberForceVelocityMultiplier;
-        double fse  = mvi.userDefinedVelocityExtras[0];
-    
-        double aFm          = 0; //active fiber force
-        double Fm           = 0;
-        double dFm_dlce     = 0;
-        double dFmAT_dlce   = 0;
-        double dFmAT_dlceAT = 0;    
-        double dFt_dtl      = 0; 
-        double Ke           = 0;
-
-        if(fiberStateClamped < 0.5){        
-            aFm          = calcActiveFm(a,fal,fv,fiso);
-            Fm           = calcFm(a,fal,fv,fpe,fiso);
-            dFm_dlce     = calcDFmDlce(lce,a,fv,fiso,optFiberLen);
-            dFmAT_dlce   = calcDFmATDlce(lce,phi,cosphi,Fm,dFm_dlce,penHeight);
-
-            //The expression below is correct only because we are using a pennation
-            //model that has a parallelogram of constant height.
-            dFmAT_dlceAT= dFmAT_dlce*cosphi;
-
-            dFt_dtl = calcDFseDtl(tl, fiso, tendonSlackLen);
-
-            //Compute the stiffness of the whole muscle/tendon complex
-            Ke = (dFmAT_dlceAT*dFt_dtl)/(dFmAT_dlceAT+dFt_dtl);
-        }
-    
-        mdi.activation                   = a;
-        mdi.fiberForce                   = Fm; 
-        mdi.fiberForceAlongTendon        = Fm*cosphi;
-        mdi.normFiberForce               = Fm/fiso;
-        mdi.activeFiberForce             = aFm;
-        mdi.passiveFiberForce            = fpe*fiso;
-                                     
-        mdi.tendonForce                  = fse*fiso;
-        mdi.normTendonForce              = fse;
-                                     
-        mdi.fiberStiffness               = dFm_dlce;
-        mdi.fiberStiffnessAlongTendon    = dFmAT_dlceAT;
-        mdi.tendonStiffness              = dFt_dtl;
-        mdi.muscleStiffness              = Ke;
-                                     
-    
-
-        //Check that the derivative of system energy less work is zero within
-        //a reasonable numerical tolerance. Throw an exception if this is not true    
-        double dFibPEdt     = fpe*fiso*dlce;
-        double dTdnPEdt     = fse*fiso*dtl;
-        double dFibWdt      = -mdi.activeFiberForce*mvi.fiberVelocity;
-        double dmcldt       = getLengtheningSpeed(s);
-        double dBoundaryWdt = mdi.tendonForce * dmcldt;
-        double ddt_KEPEmW   = dFibPEdt+dTdnPEdt-dFibWdt-dBoundaryWdt;
-        SimTK::Vector userVec(1);
-        userVec(0) = ddt_KEPEmW;  
-        mdi.userDefinedDynamicsExtras = userVec;
-
-        /////////////////////////////
-        //Populate the power entries
-        /////////////////////////////
-        mdi.fiberActivePower             = dFibWdt;
-        mdi.fiberPassivePower            = -dFibPEdt;
-        mdi.tendonPower                  = -dTdnPEdt;       
-        mdi.musclePower                  = -dBoundaryWdt;
-
-    }
-    catch(const std::exception &x) {
-        std::string msg = "Exception caught in Thelen2003Muscle::" 
-                            "calcMuscleDynamicsInfo\n"                 
-                            "of " + getName()  + "\n"                            
-                            + x.what();
-        throw OpenSim::Exception(msg);
-    }
-   
-}
 
 double Thelen2003Muscle::getMinimumFiberLength() const
 {

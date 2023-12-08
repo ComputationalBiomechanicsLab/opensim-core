@@ -247,9 +247,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(muscle.get_optimal_fiber_length()));
             CHECK(muscle.getTendonStrain(state) == 0.0);
-            CHECK(muscle.getPassiveForceMultiplier(state) ==
-                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(1.0) *
                     muscle.get_optimal_fiber_length() *
@@ -263,6 +260,9 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) ==
+                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             CHECK(muscle.getFiberVelocity(state) == 0);
             CHECK(muscle.getNormalizedFiberVelocity(state) == 0);
             CHECK(muscle.getFiberVelocityAlongTendon(state) == 0);
@@ -357,10 +357,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(0.5 * muscle.get_optimal_fiber_length()));
             CHECK(muscle.getTendonStrain(state) == 0.0);
-            CHECK(muscle.getPassiveForceMultiplier(state) ==
-                    Approx(muscle.calcPassiveForceMultiplier(0.5)));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) ==
-                    Approx(muscle.calcActiveForceLengthMultiplier(0.5)));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(0.5) *
                     muscle.get_optimal_fiber_length() *
@@ -374,6 +370,10 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) ==
+                    Approx(muscle.calcPassiveForceMultiplier(0.5)));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) ==
+                    Approx(muscle.calcActiveForceLengthMultiplier(0.5)));
             CHECK(muscle.getFiberVelocity(state) == 0);
             CHECK(muscle.getNormalizedFiberVelocity(state) == 0);
             CHECK(muscle.getFiberVelocityAlongTendon(state) == 0);
@@ -449,9 +449,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(muscle.get_optimal_fiber_length()));
             CHECK(muscle.getTendonStrain(state) == 0.0);
-            CHECK(muscle.getPassiveForceMultiplier(state) ==
-                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(1.0) *
                     muscle.get_optimal_fiber_length() *
@@ -465,6 +462,9 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) ==
+                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             CHECK(muscle.getFiberVelocity(state) == 0.21 * Vmax);
             CHECK(muscle.getNormalizedFiberVelocity(state) == 0.21);
             CHECK(muscle.getFiberVelocityAlongTendon(state) == 0.21 * Vmax);
@@ -575,9 +575,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(muscle.get_optimal_fiber_length()));
             CHECK(muscle.getTendonStrain(state) == 0.0);
-            CHECK(muscle.getPassiveForceMultiplier(state) ==
-                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(1.0) *
                     muscle.get_optimal_fiber_length() *
@@ -591,6 +588,9 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) ==
+                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             CHECK(muscle.getFiberVelocity(state) == -1.0 * Vmax);
             CHECK(muscle.getNormalizedFiberVelocity(state) == -1);
             CHECK(muscle.getFiberVelocityAlongTendon(state) == -1 * Vmax);
@@ -745,9 +745,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(muscle.get_optimal_fiber_length() * cosPenn));
             CHECK(muscle.getTendonStrain(state) == 0.0);
-            CHECK(muscle.getPassiveForceMultiplier(state) ==
-                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(1.0) *
                     muscle.get_optimal_fiber_length() *
@@ -761,6 +758,9 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) ==
+                    Approx(muscle.calcPassiveForceMultiplier(1.0)));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(1.0));
             CHECK(muscle.getFiberVelocity(state) == -Vmax * cosPenn);
             CHECK(muscle.getNormalizedFiberVelocity(state) == -cosPenn);
             CHECK(muscle.getFiberVelocityAlongTendon(state) == -Vmax); // VMT
@@ -917,8 +917,6 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
             CHECK(muscle.getFiberLengthAlongTendon(state) ==
                     Approx(fiberLengthAlongTendon));
             CHECK(muscle.getTendonStrain(state) == Approx(tendonStrain));
-            CHECK(muscle.getPassiveForceMultiplier(state) == Approx(fpass));
-            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(fal));
             const auto fiberPotentialEnergy =
                     muscle.calcPassiveForceMultiplierIntegral(normFiberLength) *
                     muscle.get_optimal_fiber_length() *
@@ -935,6 +933,8 @@ TEST_CASE("DeGrooteFregly2016Muscle basics") {
                     Approx(fiberPotentialEnergy + tendonPotentialEnergy));
 
             model.realizeVelocity(state);
+            CHECK(muscle.getPassiveForceMultiplier(state) == Approx(fpass));
+            CHECK(muscle.getActiveForceLengthMultiplier(state) == Approx(fal));
             const auto& normFiberVelocity =
                     muscle.getNormalizedFiberVelocity(state);
             const auto& fiberVelocity = Vmax * normFiberVelocity;
