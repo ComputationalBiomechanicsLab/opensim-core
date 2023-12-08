@@ -248,7 +248,7 @@ Millard2012AccelerationMuscle(const std::string &aName,  double aMaxIsometricFor
     addStateVariable(STATE_FIBER_LENGTH_NAME);
     addStateVariable(STATE_FIBER_VELOCITY_NAME);
 
-    this->_forceMultipliers = addCacheVariable(
+    this->_forceMultipliersCV = addCacheVariable(
         "_forceMultipliers",
         Millard2012AccelerationMuscle::ForceMultipliersCV(),
         SimTK::Stage::Position);
@@ -363,14 +363,14 @@ double Millard2012AccelerationMuscle::
 const Millard2012AccelerationMuscle::ForceMultipliersCV&
 Millard2012AccelerationMuscle::getForceMultipliers(const SimTK::State& s) const
 {
-    if (isCacheVariableValid(s, _forceMultipliers)) {
-        return getCacheVariableValue(s, _forceMultipliers);
+    if (isCacheVariableValid(s, _forceMultipliersCV)) {
+        return getCacheVariableValue(s, _forceMultipliersCV);
     }
 
     ForceMultipliersCV& multipliers =
-        updCacheVariableValue(s, _forceMultipliers);
+        updCacheVariableValue(s, _forceMultipliersCV);
     calcForceMultipliers(s, multipliers);
-    markCacheVariableValid(s, _forceMultipliers);
+    markCacheVariableValid(s, _forceMultipliersCV);
     return multipliers;
 }
 

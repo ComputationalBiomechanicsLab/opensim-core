@@ -1137,7 +1137,7 @@ private:
         double tendonForceLengthMultiplier = SimTK::NaN;
     };
 
-    mutable CacheVariable<ForceMultipliersCV> _forceMultipliers;
+    mutable CacheVariable<ForceMultipliersCV> _forceMultipliersCV;
 
 };    
 
