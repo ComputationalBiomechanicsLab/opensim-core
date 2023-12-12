@@ -315,14 +315,15 @@ void DeGrooteFregly2016Muscle::calcFiberVelocityInfoHelper(
         fvi.fiberVelocityAlongTendon =
                 fvi.fiberVelocity / mli.cosPennationAngle;
     } else {
-        double normTendonVelocity = ignoreTendonCompliance
-            ? 0.
-            : calcTendonForceLengthInverseCurveDerivative(
-                    normTendonForceDerivative,
-                    mli.normTendonLength);
-        double tendonVelocity = get_tendon_slack_length() * normTendonVelocity;
-        fvi.fiberVelocityAlongTendon =
-                muscleTendonVelocity - tendonVelocity;
+        const double normTendonVelocity =
+            ignoreTendonCompliance
+                ? 0.
+                : calcTendonForceLengthInverseCurveDerivative(
+                      normTendonForceDerivative,
+                      mli.normTendonLength);
+        const double tendonVelocity =
+            get_tendon_slack_length() * normTendonVelocity;
+        fvi.fiberVelocityAlongTendon = muscleTendonVelocity - tendonVelocity;
         fvi.fiberVelocity =
                 fvi.fiberVelocityAlongTendon * mli.cosPennationAngle;
         fvi.normFiberVelocity =
