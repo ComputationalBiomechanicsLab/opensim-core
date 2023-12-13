@@ -239,9 +239,9 @@ void DeGrooteFregly2016Muscle::computeStateVariableDerivatives(
             // calcTendonForceMultiplerDerivative() is with respect to
             // normalized tendon length, so using the chain rule, to get
             // normalized tendon force derivative with respect to time, we
-            // multiply by normalized fiber velocity.
+            // multiply by normalized tendon velocity.
             normTendonForceDerivative =
-                    fvi.normTendonVelocity *
+                getTendonVelocity(s) / getTendonSlackLength() *
                     calcTendonForceMultiplierDerivative(mli.normTendonLength);
         } else {
             normTendonForceDerivative = getDiscreteVariableValue(
@@ -314,20 +314,16 @@ void DeGrooteFregly2016Muscle::calcFiberVelocityInfoHelper(
                             m_maxContractionVelocityInMetersPerSecond;
         fvi.fiberVelocityAlongTendon =
                 fvi.fiberVelocity / mli.cosPennationAngle;
-        fvi.tendonVelocity =
-                muscleTendonVelocity - fvi.fiberVelocityAlongTendon;
-        fvi.normTendonVelocity = fvi.tendonVelocity / get_tendon_slack_length();
     } else {
-        if (ignoreTendonCompliance) {
-            fvi.normTendonVelocity = 0.0;
-        } else {
-            fvi.normTendonVelocity =
-                    calcTendonForceLengthInverseCurveDerivative(
-                            normTendonForceDerivative, mli.normTendonLength);
-        }
-        fvi.tendonVelocity = get_tendon_slack_length() * fvi.normTendonVelocity;
-        fvi.fiberVelocityAlongTendon =
-                muscleTendonVelocity - fvi.tendonVelocity;
+        const double normTendonVelocity =
+            ignoreTendonCompliance
+                ? 0.
+                : calcTendonForceLengthInverseCurveDerivative(
+                      normTendonForceDerivative,
+                      mli.normTendonLength);
+        const double tendonVelocity =
+            get_tendon_slack_length() * normTendonVelocity;
+        fvi.fiberVelocityAlongTendon = muscleTendonVelocity - tendonVelocity;
         fvi.fiberVelocity =
                 fvi.fiberVelocityAlongTendon * mli.cosPennationAngle;
         fvi.normFiberVelocity =
@@ -426,8 +422,6 @@ void DeGrooteFregly2016Muscle::calcMuscleDynamicsInfoHelper(
     mdi.fiberActivePower = -(mdi.activeFiberForce + nonConPassiveFiberForce) *
                            fvi.fiberVelocity;
     mdi.fiberPassivePower = -conPassiveFiberForce * fvi.fiberVelocity;
-    mdi.tendonPower = -mdi.tendonForce * fvi.tendonVelocity;
-    mdi.musclePower = -mdi.tendonForce * muscleTendonVelocity;
 
     mdi.userDefinedDynamicsExtras.resize(5);
     mdi.userDefinedDynamicsExtras[m_mdi_passiveFiberElasticForce] =

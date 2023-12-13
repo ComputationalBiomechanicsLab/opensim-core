@@ -614,9 +614,6 @@ protected:
              
              pennationAngularVelocity  angle/time            rad/s     [3]
              
-             tendonVelocity            length/time           m/s       
-             normTendonVelocity        (length/time)/length  (m/s)/m   [4]
-             
              fiberForceVelocityMultiplier force/force          NA        [5]
 
              userDefinedVelocityExtras    NA                   NA      [6]
@@ -632,10 +629,7 @@ protected:
         [3] The sign of the angular velocity is defined using the right 
             hand rule.
 
-        [4] normTendonVelocity is the tendonVelocity (the lengthening velocity 
-            of the tendon) divided by its resting length
-
-        [5] The fiberForceVelocityMultiplier is the scaling factor that represents
+        [4] The fiberForceVelocityMultiplier is the scaling factor that represents
             how a muscle fiber's force generating capacity is modulated by the
             contraction (concentric or eccentric) velocity of the fiber.
             Generally this curve has a value of 1 at a fiber velocity of 0, 
@@ -644,7 +638,7 @@ protected:
             velocity. The force velocity curve, which computes this term,  
             is usually an interpolation of an experimental curve.
 
-        [6] This vector is left for the muscle modeler to populate with any
+        [5] This vector is left for the muscle modeler to populate with any
             computationally expensive quantities that are computed in 
             calcFiberVelocityInfo, and required for use in the user defined 
             function calcMuscleDynamicsInfo. None of the parent classes make 
@@ -659,9 +653,6 @@ protected:
                                             //
         double pennationAngularVelocity;    //angle/time            rad/s
                                             //
-        double tendonVelocity;              //length/time           m/s
-        double normTendonVelocity;          //(length/time)/length  (m/s)/m
-
         double fiberForceVelocityMultiplier;     //force/force           NA
 
         SimTK::Vector userDefinedVelocityExtras;//NA                  NA
@@ -671,8 +662,6 @@ protected:
             fiberVelocityAlongTendon(SimTK::NaN),
             normFiberVelocity(SimTK::NaN),
             pennationAngularVelocity(SimTK::NaN),
-            tendonVelocity(SimTK::NaN), 
-            normTendonVelocity(SimTK::NaN),
             fiberForceVelocityMultiplier(SimTK::NaN),
             userDefinedVelocityExtras(0,SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
@@ -712,8 +701,6 @@ protected:
                                         
             fiberActivePower            force*velocity       W (N*m/s)
             fiberPassivePower           force*velocity       W (N*m/s)
-            tendonPower                 force*velocity       W (N*m/s)
-            musclePower                 force*velocity       W (N*m/s)
 
             userDefinedDynamicsData     NA                   NA     [11]
 
@@ -784,8 +771,6 @@ protected:
                                         //
         double fiberActivePower;        // force*velocity       W
         double fiberPassivePower;       // force*velocity       W
-        double tendonPower;             // force*velocity       W
-        double musclePower;             // force*velocity       W
 
         SimTK::Vector userDefinedDynamicsExtras; //NA          NA
 
@@ -804,8 +789,6 @@ protected:
             muscleStiffness(SimTK::NaN),
             fiberActivePower(SimTK::NaN),
             fiberPassivePower(SimTK::NaN),
-            tendonPower(SimTK::NaN),
-            musclePower(SimTK::NaN),
             userDefinedDynamicsExtras(0, SimTK::NaN){};
         friend std::ostream& operator<<(std::ostream& o, 
             const MuscleDynamicsInfo& mdi) {

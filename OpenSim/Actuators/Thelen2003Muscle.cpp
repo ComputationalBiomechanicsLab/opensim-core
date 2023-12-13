@@ -495,8 +495,6 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
     
             //Check for singularity conditions, and clamp output appropriately
 
-        double dmcldt = getLengtheningSpeed(s);
-
         //default values that are appropriate when fiber length has been clamped
         //to its minimum allowable value.
 
@@ -515,8 +513,6 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
                                             tanPhi,lce,dlce);
         double dlceAT = getPennationModel().calcFiberVelocityAlongTendon(
                             lce, dlce, sinphi, cosphi, dphidt);
-        double dtl    = getPennationModel().calcTendonVelocity(
-                            cosphi, sinphi, dphidt, lce, dlce, dmcldt);
     
     
         //Switching condition: if the fiber is clamped and the tendon and the 
@@ -527,7 +523,6 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
              dlceAT = 0;
              dlceN = 0;
              dphidt = 0;
-             dtl = dmcldt;
              fv = 1.0;
              fiberStateClamped = 1.0;
         }
@@ -538,9 +533,6 @@ void Thelen2003Muscle::calcFiberVelocityInfo(const SimTK::State& s,
         fvi.normFiberVelocity           = dlceN;
 
         fvi.pennationAngularVelocity    = dphidt;
-
-        fvi.tendonVelocity              = dtl;
-        fvi.normTendonVelocity          = dtl/getTendonSlackLength();
 
         fvi.fiberForceVelocityMultiplier = fv;
 
@@ -591,7 +583,7 @@ void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s,
         // double sinphi   = mli.sinPennationAngle;
 
         double tl   = mli.tendonLength; 
-        double dtl  = mvi.tendonVelocity;
+        double dtl  = getTendonVelocity(s);
         // double tlN  = mli.normTendonLength;
 
         //Default values appropriate when the fiber is clamped to its minimum length
@@ -662,8 +654,6 @@ void Thelen2003Muscle::calcMuscleDynamicsInfo(const SimTK::State& s,
         /////////////////////////////
         mdi.fiberActivePower             = dFibWdt;
         mdi.fiberPassivePower            = -dFibPEdt;
-        mdi.tendonPower                  = -dTdnPEdt;       
-        mdi.musclePower                  = -dBoundaryWdt;
 
     }
     catch(const std::exception &x) {
