@@ -6,7 +6,13 @@
 
 namespace OpenSim
 {
+
+// Forward declaration.
 class MuscleCurveControlPoint;
+
+//==============================================================================
+//                  CONTROL POINT
+//==============================================================================
 
 struct CurveControlPoint
 {
@@ -27,28 +33,12 @@ struct CurveControlPoint
     double dydx = SimTK::NaN;
 };
 
-//==============================================================================
-//                      Monotonic Control Points Storage
-//==============================================================================
-class MonoControlPoints // TODO this class is perhaps overengineering.
-{
-public:
-    MonoControlPoints() = default;
-
-    void appendChecked(CurveControlPoint pt);
-
-    const std::vector<CurveControlPoint>& getPoints()
-    {
-        return _storage;
-    }
-
-private:
-    std::vector<CurveControlPoint> _storage{};
-};
+std::ostream& operator<<(std::ostream& os, const CurveControlPoint& ctrlPt);
 
 //==============================================================================
-//              User Facing Control Points for Curve Generation
+//              CURVY CONTROL POINT
 //==============================================================================
+
 // Control point with curviness parameter.
 class MuscleCurveControlPoint : public CurveControlPoint
 {
@@ -67,20 +57,7 @@ public:
         SimTK::NaN; // TODO weird: last curviness of last point is invalid.
 };
 
-// MuscleCurveParams -> MuscleCurveControlPoints (x, y, dy/dx, curviness)
-//
-// MuscleCurveControlPoint (x, y, dy/dx, curviness) -> ControlPoints(x, y,
-// dy/dx)
-//
-// MuscleCurveControlPoint (x, y, dy/dx) -> CubicMonoSpline(x0, yInt, coeffs,
-// x1) *** PAIR TO PAIR ***
-//
-// SmoothSegmentedCubicMonoSpline
-//
-// SmoothSegmentedSplineFunction
-//
-
-class SmoothSegmentedCubicMonoSplineData;
+std::ostream& operator<<(std::ostream& os, const MuscleCurveControlPoint& ctrlPt);
 
 //==============================================================================
 //              Cubic Spline
@@ -111,9 +88,15 @@ public:
     double x1         = SimTK::NaN;
 };
 
+std::ostream& operator<<(std::ostream& os, const CubicSpline& spline);
+
 //==============================================================================
 //              Cubic Monotonic Spline
 //==============================================================================
+
+// Forward declaration.
+class SmoothSegmentedCubicMonoSplineData;
+
 class CubicMonoSpline final : public CubicSpline
 {
 public:
@@ -137,7 +120,7 @@ private:
 };
 
 //==============================================================================
-//                  Smooth Segmented Cubic Mono Spline Storage
+//                  SPLINE STORAGE
 //==============================================================================
 
 // C2 continuous segmented cubic monotonic spline storage.
@@ -146,7 +129,7 @@ class SmoothSegmentedCubicMonoSplineData
 public:
     SmoothSegmentedCubicMonoSplineData() = default;
 
-    SmoothSegmentedCubicMonoSplineData(
+    explicit SmoothSegmentedCubicMonoSplineData(
         const std::vector<CubicMonoSpline>& splines);
 
     // Checks if spline segments are C2 continuous.
@@ -156,26 +139,34 @@ public:
 
     const CubicMonoSpline& at(size_t index) const;
 
+    const CubicMonoSpline& findSegment(double x) const;
+
 private:
     std::vector<double> _data;
 };
 
+//==============================================================================
+//                  SMOOTH SEGMENTED CUBIC MONO SPLINE
+//==============================================================================
+
 class SmoothSegmentedCubicMonoSpline
 {
 public:
-    SmoothSegmentedCubicMonoSpline(
-        const std::vector<CubicMonoSpline>& splines,
+    explicit SmoothSegmentedCubicMonoSpline(
+        std::vector<CubicMonoSpline>&& splines,
         CurveControlPoint pStart,
         CurveControlPoint pEnd);
 
-    SmoothSegmentedCubicMonoSpline(const std::vector<CurveControlPoint>& pts);
+    explicit SmoothSegmentedCubicMonoSpline(std::vector<CurveControlPoint>&& pts);
 
-    SmoothSegmentedCubicMonoSpline(
+    explicit SmoothSegmentedCubicMonoSpline(
         const std::vector<MuscleCurveControlPoint>& pts);
 
     SimTK::Vec2 getDomain() const;
 
-    void setExtrapolationBeyondDomain(bool allowExtrapolation);
+    double calcValue(double x) const;
+
+    const CubicSpline& findInverseSegment(double y) const;
 
 private:
     SmoothSegmentedCubicMonoSplineData _splines;

@@ -3,15 +3,23 @@
 #include "OpenSim/Common/Assertion.h"
 #include <array>
 #include <cmath>
+#include <stdexcept>
 
 #include <SimTKcommon/Scalar.h>
 #include <SimTKcommon/internal/NTraits.h>
 
 //==============================================================================
-//                      CALCULATION HELPERS
+//                      CALCULATION HELPERS: C2-CONTINUITY CHECKS
 //==============================================================================
 namespace
 {
+
+void opensim_assert(bool cond, std::string msg)
+{
+    if (!cond) {
+        throw std::runtime_error(msg);
+    }
+}
 
 bool isC2Continuous(
     const OpenSim::CurveControlPoint& pStart,
@@ -19,9 +27,11 @@ bool isC2Continuous(
     double eps = 1e-13)
 {
     const double x = pStart.x;
-    return std::abs(pStart.y - spline.calcValue(x)) < eps &&
-           std::abs(pStart.dydx - spline.calcDerivative(x, 1)) < eps &&
-           std::abs(spline.calcDerivative(x, 2)) < eps;
+    bool isContinuous =
+        std::abs(pStart.y - spline.calcValue(x)) < eps &&
+        std::abs(pStart.dydx - spline.calcDerivative(x, 1)) < eps &&
+        std::abs(spline.calcDerivative(x, 2)) < eps;
+    return isContinuous;
 }
 
 bool isC2Continuous(
@@ -30,9 +40,11 @@ bool isC2Continuous(
     double eps = 1e-13)
 {
     const double x = pEnd.x;
-    return std::abs(pEnd.y - spline.calcValue(x)) < eps &&
-           std::abs(pEnd.dydx - spline.calcDerivative(x, 1)) < eps &&
-           std::abs(spline.calcDerivative(x, 2)) < eps;
+    bool isContinuous =
+        std::abs(pEnd.y - spline.calcValue(x)) < eps &&
+        std::abs(pEnd.dydx - spline.calcDerivative(x, 1)) < eps &&
+        std::abs(spline.calcDerivative(x, 2)) < eps;
+    return isContinuous;
 }
 
 bool isC2Continuous(
@@ -41,14 +53,19 @@ bool isC2Continuous(
     double eps = 1e-13)
 {
     const double x = sStart.x1;
-    return sStart.x1 == sEnd.x0 &&
-           std::abs(sStart.calcIntegral(x) - sEnd.calcIntegral(x)) < eps &&
-           std::abs(sStart.calcValue(x) - sEnd.calcValue(x)) < eps &&
-           std::abs(sStart.calcDerivative(x, 1) - sEnd.calcDerivative(x, 1)) <
-               eps &&
-           std::abs(sStart.calcDerivative(x, 2) - sEnd.calcDerivative(x, 2)) <
-               eps;
+    bool isContinuous =
+        sStart.x1 == sEnd.x0 &&
+        std::abs(sStart.calcIntegral(x) - sEnd.calcIntegral(x)) < eps &&
+        std::abs(sStart.calcValue(x) - sEnd.calcValue(x)) < eps &&
+        std::abs(sStart.calcDerivative(x, 1) - sEnd.calcDerivative(x, 1)) <
+            eps &&
+        std::abs(sStart.calcDerivative(x, 2) - sEnd.calcDerivative(x, 2)) < eps;
+    return isContinuous;
 }
+
+//==============================================================================
+//                      CALCULATION HELPERS: MONOTONICITY CHECKS
+//==============================================================================
 
 // Checks if an aribtrarily smooth monotonic curve can be created between
 // the control points.
@@ -61,7 +78,7 @@ bool smoothMonotonicCurveExists(double dy, double dydx0, double dydx1)
 
     // If change dy is nonzero: end-point derivatives must match sign.
     const double sign = dy > 0. ? 1. : -1.;
-    return sign * dydx0 >= 0. && sign * dydx1 < 0.;
+    return sign * dydx0 >= 0. && sign * dydx1 >= 0.;
 }
 
 bool smoothMonotonicCurveExists(
@@ -73,7 +90,11 @@ bool smoothMonotonicCurveExists(
 }
 
 // Returns true if the Hermite interpolant is monotonic.
-bool isHermiteInterpolantMonotonic(double dy, double dydx0, double dydx1)
+bool isHermiteInterpolantMonotonic(
+    double dx,
+    double dy,
+    double dydx0,
+    double dydx1)
 {
     // If change in y is zero, end-point derivatives must be zero.
     if (std::abs(dy) < SimTK::Eps) {
@@ -86,8 +107,8 @@ bool isHermiteInterpolantMonotonic(double dy, double dydx0, double dydx1)
         return false;
     }
 
-    const double alpha = dydx0 / dy;
-    const double beta  = dydx1 / dy;
+    const double alpha = dydx0 / dy * dx;
+    const double beta  = dydx1 / dy * dx;
     if (alpha + beta - 2. <= 0.) {
         return true;
     }
@@ -103,6 +124,10 @@ bool isHermiteInterpolantMonotonic(double dy, double dydx0, double dydx1)
 
     return false;
 }
+
+//==============================================================================
+//                      CALCULATION HELPERS: CUBIC SPLINE INTERPOLATION
+//==============================================================================
 
 // Construct two spline segments connecting the control points.
 std::pair<OpenSim::CubicMonoSpline, OpenSim::CubicMonoSpline>
@@ -132,8 +157,11 @@ calcCubicMonoSplineSegments(
     const double u0 = (2. - 6. * (dy / dx + v0) / a1) * dx;
     const double x1 = x0 + u0;
 
+    const double u1 = dx - u0;
+
     // Jerk at node.
-    const double j1 = a1 / x1;
+    const double j0 = a1 / u0;
+    const double j1 = a1 / u1;
 
     // Y value at node.
     const double y1 = y0 + u0 * v0 + a1 * u0 * u0 / 6.;
@@ -142,27 +170,27 @@ calcCubicMonoSplineSegments(
     // Fill values of splines.
     splines.first.x0         = x0;
     splines.first.x1         = x1;
-    splines.first.coeff      = {y0, v0, 0., j1 / 6.};
+    splines.first.coeff      = {y0, v0, 0., j0 / 6.};
     splines.first.y0Integral = y0Integral;
 
     splines.second.x0         = x1;
     splines.second.x1         = x2;
-    splines.second.coeff      = {y1, v1, a1 / 2., j1 / 6.};
+    splines.second.coeff      = {y1, v1, a1 / 2., -j1 / 6.};
     splines.second.y0Integral = splines.first.calcEndIntegral();
 
     // Update integrated value.
     y0Integral = splines.second.calcEndIntegral();
 
     // Verify that constructed curves are C2 continuous.
-    OPENSIM_ASSERT(
-        isC2Continuous(pStart, splines.first) &&
+    opensim_assert(
+        isC2Continuous(pStart, splines.first),
         "calcCubicMonoSplineSegments failed: Start point not continuous");
-    OPENSIM_ASSERT(
-        isC2Continuous(splines.first, splines.second) &&
+    opensim_assert(
+        isC2Continuous(splines.first, splines.second),
         "calcCubicMonoSplineSegments failed: Segments mid point not "
         "continuous");
-    OPENSIM_ASSERT(
-        isC2Continuous(splines.first, pEnd) &&
+    opensim_assert(
+        isC2Continuous(splines.second, pEnd),
         "calcCubicMonoSplineSegments failed: Segments end point not "
         "continuous");
 
@@ -177,26 +205,27 @@ calcCubicMonoSplineSegments(
 std::vector<OpenSim::CubicMonoSpline> calcCubicMonoSplineSegments(
     const std::vector<OpenSim::CurveControlPoint>& ctrlPts)
 {
-    OPENSIM_ASSERT(
-        ctrlPts.size() < 2 &&
+    opensim_assert(
+        ctrlPts.size() >= 2,
         "Failed to calculate SmoothSegmentedCubicMonoSpline: "
         "Need more than two control points");
 
     // Verify that a smooth monotonic curve through the control points exists.
-    for (auto p = ctrlPts.begin(); p != --ctrlPts.end();) {
-        OPENSIM_ASSERT(
-            smoothMonotonicCurveExists(*p, *p++) &&
+    for (auto p = ++ctrlPts.begin(); p != ctrlPts.end(); ++p) {
+        opensim_assert(
+            smoothMonotonicCurveExists(*(p - 1), *p),
             "Invalid Control Points: Monotonic curve does not exist.");
     }
 
     double y0Integral = 0.;
     std::vector<OpenSim::CubicMonoSpline> splines;
-    for (auto p = ctrlPts.begin(); p != --ctrlPts.end();) {
+    for (auto p = ++ctrlPts.begin(); p != ctrlPts.end(); ++p) {
         std::pair<OpenSim::CubicMonoSpline, OpenSim::CubicMonoSpline> segments =
-            calcCubicMonoSplineSegments(*p, *p++, y0Integral);
+            calcCubicMonoSplineSegments(*(p - 1), *p, y0Integral);
         splines.push_back(segments.first);
         splines.push_back(segments.second);
     }
+    return splines;
 }
 
 std::vector<OpenSim::CurveControlPoint>
@@ -211,9 +240,9 @@ convertCurvyControlPointsToControlPoints(
 
     ctrlPts.push_back(curvyCtrlPts.at(0));
 
-    for (auto p = curvyCtrlPts.begin(); p != --curvyCtrlPts.end();) {
-        const OpenSim::MuscleCurveControlPoint& pStart = *p;
-        const OpenSim::MuscleCurveControlPoint& pEnd   = *p++;
+    for (auto p = ++curvyCtrlPts.begin(); p != curvyCtrlPts.end(); ++p) {
+        const OpenSim::MuscleCurveControlPoint& pStart = *(p - 1);
+        const OpenSim::MuscleCurveControlPoint& pEnd   = *p;
 
         pStart.calcCurvyPoints(pEnd, ctrlPts);
 
@@ -237,12 +266,12 @@ double CurveControlPoint::calcTangentInterceptCoordinate(
 {
     const double y0 = y;
     const double y1 = other.y;
-    OPENSIM_ASSERT(
-        std::abs(y0 - y1) > SimTK::Eps &&
+    opensim_assert(
+        std::abs(y0 - y1) > SimTK::Eps,
         "Invalid curviness: Cannot apply curviness for straight line segment");
 
-    OPENSIM_ASSERT(
-        smoothMonotonicCurveExists(*this, other) &&
+    opensim_assert(
+        smoothMonotonicCurveExists(*this, other),
         "Invalid curviness: Impossible to create smooth monotonic curve");
 
     const double x0    = x;
@@ -280,27 +309,12 @@ CurveControlPoint::operator bool() const
     return SimTK::isNaN(x) && SimTK::isNaN(y) && SimTK::isNaN(dydx);
 }
 
-//==============================================================================
-//                      Monotonic Control Points Storage
-//==============================================================================
-
-void MonoControlPoints::appendChecked(CurveControlPoint pt)
+std::ostream& operator<<(std::ostream& os, const CurveControlPoint& ctrlPt)
 {
-    const size_t size = _storage.size();
-    if (size == 0) {
-        _storage.push_back(pt);
-        return;
-    }
-
-    // Verify that monotonic curve between points exists.
-    const CurveControlPoint& p0 = _storage.at(size - 1);
-    const CurveControlPoint& p1 = pt;
-    OPENSIM_ASSERT(
-        smoothMonotonicCurveExists(p0, p1) &&
-        "Invalid control point: Impossible to create smooth monotonic curve "
-        "between control points");
-
-    _storage.push_back(pt);
+    return os << "CurveControlPoint{"
+              << "x: " << ctrlPt.x << ", "
+              << "y: " << ctrlPt.y << ", "
+              << "dydx: " << ctrlPt.dydx << "}";
 }
 
 //==============================================================================
@@ -311,9 +325,9 @@ size_t MuscleCurveControlPoint::calcCurvyPoints(
     const MuscleCurveControlPoint& other,
     std::vector<CurveControlPoint>& buffer) const
 {
-    OPENSIM_ASSERT(curviness >= 0. && "Curviness must be nonnegative.");
-    OPENSIM_ASSERT(
-        curviness < MuscleCurveControlPoint::MAX_CURVINESS &&
+    opensim_assert(curviness >= 0., "Curviness must be nonnegative.");
+    opensim_assert(
+        curviness < MuscleCurveControlPoint::MAX_CURVINESS,
         "Curviness must be smaller than MAX_CURVINESS.");
 
     const double curviness  = curviness;
@@ -341,16 +355,28 @@ size_t MuscleCurveControlPoint::calcCurvyPoints(
     return 2;
 }
 
+std::ostream& operator<<(
+    std::ostream& os,
+    const MuscleCurveControlPoint& ctrlPt)
+{
+    return os << "MuscleCurveControlPoint{"
+              << "x: " << ctrlPt.x << ", "
+              << "y: " << ctrlPt.y << ", "
+              << "dydx: " << ctrlPt.dydx << ", "
+              << "curviness: " << ctrlPt.curviness << "}";
+}
+
 //==============================================================================
 //                      Cubic Spline
 //==============================================================================
 
 bool CubicSpline::isMonotonic() const
 {
+    const double dx    = x1 - x0;
     const double dy    = calcValue(x1) - calcValue(x0);
     const double dydx0 = calcDerivative(x0, 1);
     const double dydx1 = calcDerivative(x1, 1);
-    return isHermiteInterpolantMonotonic(dy, dydx0, dydx1);
+    return isHermiteInterpolantMonotonic(dx, dy, dydx0, dydx1);
 }
 
 double CubicSpline::calcDerivative(double x, size_t order) const
@@ -393,7 +419,7 @@ double CubicSpline::calcInverseValue(double y, double eps, size_t maxIter) const
         xEstimate += xStep;
     }
 
-    OPENSIM_ASSERT(std::abs(yError) < eps && "Failed to invert spline segment");
+    opensim_assert(std::abs(yError) < eps, "Failed to invert spline segment");
     return xEstimate;
 }
 
@@ -414,14 +440,25 @@ double CubicSpline::calcEndIntegral() const
     return calcIntegral(x1);
 }
 
+std::ostream& operator<<(std::ostream& os, const CubicSpline& spline)
+{
+    return os << "CubicSpline{"
+              << "x0: " << spline.x0 << ", "
+              << "coeff: {" << spline.coeff.at(0) << ", " << spline.coeff.at(1)
+              << ", " << spline.coeff.at(2) << ", " << spline.coeff.at(3)
+              << "}, "
+              << "y0Integral: " << spline.y0Integral << ", "
+              << "x1: " << spline.x1 << "}";
+}
+
 //==============================================================================
 //                      Cubic Mono Spline
 //==============================================================================
 
-CubicMonoSpline::CubicMonoSpline(CubicSpline spline)
+CubicMonoSpline::CubicMonoSpline(CubicSpline spline) : CubicSpline(spline)
 {
-    OPENSIM_ASSERT(
-        spline.isMonotonic() &&
+    opensim_assert(
+        spline.isMonotonic(),
         "Failed to construct monotonic spline: Cubic spline is not monotonic");
 }
 
@@ -441,8 +478,8 @@ void SmoothSegmentedCubicMonoSplineData::appendChecked(CubicMonoSpline spline)
 {
     // Verify that segments are C2 continuous.
     if (size() > 0) {
-        OPENSIM_ASSERT(
-            isC2Continuous(splines.at(size() - 1), spline) &&
+        opensim_assert(
+            isC2Continuous(at(size() - 1), spline),
             "Segment node C2 continuity check failed");
     }
 
@@ -452,23 +489,22 @@ void SmoothSegmentedCubicMonoSplineData::appendChecked(CubicMonoSpline spline)
     }
 
     for (double d : reinterpret_cast<
-             const std::array<double, CubicMonoSpline::dataSize() - 1>&>(
-             spline)) {
+             const std::array<double, CubicMonoSpline::dataSize()>&>(spline)) {
         _data.push_back(d);
     }
 
     // Verify that segments are C2 continuous. TODO this can be removed.
     if (size() > 1) {
-        OPENSIM_ASSERT(
-            isC2Continuous(splines.at(size() - 1), spline.at(size() - 2)) &&
+        opensim_assert(
+            isC2Continuous(at(size() - 2), at(size() - 1)),
             "Segment node C2 continuity check failed after writing as raw "
             "doubles");
     }
 
     // Verify expected number of elements in container.
     constexpr size_t alignment = CubicMonoSpline::dataSize() - 1;
-    OPENSIM_ASSERT(
-        _data.size() % alignment == 1 &&
+    opensim_assert(
+        _data.size() % alignment == 1,
         "Unexpected storage length of SmoothSegmentedCubicMonoSplineData");
 }
 
@@ -482,7 +518,7 @@ const CubicMonoSpline& SmoothSegmentedCubicMonoSplineData::at(
 {
     constexpr size_t alignment = CubicMonoSpline::dataSize() - 1;
     return reinterpret_cast<const CubicMonoSpline&>(
-        _data.at(index / alignment));
+        _data.at(index * alignment));
 }
 
 //==============================================================================
@@ -490,26 +526,28 @@ const CubicMonoSpline& SmoothSegmentedCubicMonoSplineData::at(
 //==============================================================================
 
 SmoothSegmentedCubicMonoSpline::SmoothSegmentedCubicMonoSpline(
-    const std::vector<CubicMonoSpline>& splines,
+    std::vector<CubicMonoSpline>&& splines,
     CurveControlPoint pStart,
     CurveControlPoint pEnd) :
-    _splines(splines),
+    _splines(SmoothSegmentedCubicMonoSplineData(splines)),
     _pStart(pStart), _pEnd(pEnd)
 {
-    OPENSIM_ASSERT(
-        _splines.size() > 0 && "Cannot create smooth curve with zero segments");
+    /* throw std::runtime_error("or stop here i guess"); */
+    opensim_assert(
+        _splines.size() > 0,
+        "Cannot create smooth curve with zero segments");
 
     // Verify that endpoints are C2 continuous.
-    OPENSIM_ASSERT(isC2Continuous(
-        _pStart,
-        _splines.at(0) && "Start point C2 continuity failed"));
-    OPENSIM_ASSERT(isC2Continuous(
-        _pEnd,
-        _splines.at(splines.size() - 1) && "End point C2 continuity failed"));
+    opensim_assert(
+        isC2Continuous(_pStart, _splines.at(0)),
+        "Start point C2 continuity failed");
+    opensim_assert(
+        isC2Continuous(_pEnd, _splines.at(splines.size() - 1)),
+        "End point C2 continuity failed");
 }
 
 SmoothSegmentedCubicMonoSpline::SmoothSegmentedCubicMonoSpline(
-    const std::vector<CurveControlPoint>& pts) :
+    std::vector<CurveControlPoint>&& pts) :
     SmoothSegmentedCubicMonoSpline(
         calcCubicMonoSplineSegments(pts),
         pts.at(0),
@@ -527,15 +565,27 @@ SimTK::Vec2 SmoothSegmentedCubicMonoSpline::getDomain() const
     return {_pStart.x, _pEnd.x};
 }
 
-void SmoothSegmentedCubicMonoSpline::setExtrapolationBeyondDomain(
-    bool allowExtrapolation)
+const CubicMonoSpline& SmoothSegmentedCubicMonoSplineData::findSegment(
+    double x) const
 {
-    _extrapolateBeyondDomain = allowExtrapolation;
+    // TODO use algo
+    for (size_t i = 0; i < size(); ++i) {
+        const CubicMonoSpline& s = at(i);
+        if (s.x0 >= x) {
+            return s;
+        }
+    }
+    return at(size() - 1);
+}
+
+double SmoothSegmentedCubicMonoSpline::calcValue(double x) const
+{
+    return _splines.findSegment(x).calcValue(x);
 }
 
 } // namespace OpenSim
 
-/* OPENSIM_ASSERT(sign * dydx0 >= 0. && "Monotonicity check failed"); */
+/* opensim_assert(sign * dydx0 >= 0. && "Monotonicity check failed"); */
 
 /* CubicSpline::CubicSpline() = default; */
 

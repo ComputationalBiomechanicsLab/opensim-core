@@ -9,6 +9,7 @@ if(BUILD_API_EXAMPLES)
         ExampleLuxoMuscle
         ControllerExample
         MuscleExample
+        MuscleSplines
         CustomActuatorExample
         OptimizationExample_Arm26
         checkEnvironment
@@ -19,6 +20,7 @@ if(BUILD_API_EXAMPLES)
         DESTINATION "${OPENSIM_INSTALL_CPPEXDIR}")
 
     add_subdirectory(ExampleHopperDevice)
+    add_subdirectory(MuscleSplines)
     add_subdirectory(SymbolicExpressionReporter)
     add_subdirectory(DataTable)
     add_subdirectory(DataAdapter)
@@ -27,6 +29,7 @@ if(BUILD_API_EXAMPLES)
 elseif()
 
     add_subdirectory(ControllerExample)
+    add_subdirectory(MuscleSplines)
     add_subdirectory(ExampleLuxoMuscle)
     add_subdirectory(ExampleMain)
     add_subdirectory(OptimizationExample_Arm26)
