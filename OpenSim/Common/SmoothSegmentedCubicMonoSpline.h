@@ -3,71 +3,119 @@
 
 #include "SimTKmath.h"
 #include <array>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <utility>
 
 namespace OpenSim
 {
 
 // Forward declaration.
 class MuscleCurveControlPoint;
+class CurveControlPoint;
+
+// Procedure:
+//
+// 1. Convert Curved control points to CurveControlPoints
+// 2. Convert CurveControlPoint into CurveSegmentShape
+// 3. Use CurveSegmentShape to generate CurveKnots and CurveControlPoints
+// 4. Create C1 interpolating spline of segment:
+//      4.1 Create 4 curve knots.
+//      4.2 Check if knots are hermite-monotonic
+//      4.3 split all segments that are not herminte monotonic
+//      4.4 Keep going until done.
+// 5. Create C2 interpolating spline of segment:
+//      5.1 start with grid from C1 spline
+//      5.2 fit the C2 spline
+//      5.3 split all segments that are not monotonic
+//      5.4 Keep going until done
+// 6. Collect spline segments in function
+//      6.1 Check continuity at all knots
+//      6.2 Check Monotonicity of segments
+//
 
 //==============================================================================
-//                  CONTROL POINT
+//                  CURVE POINT
 //==============================================================================
 
-struct CurveControlPoint
+class CurvePoint
 {
-    CurveControlPoint() = default;
+public:
+    CurvePoint() = default;
 
-    // Returns NaN if there is no such intercept, e.g. curviness = 0.
-    // TODO take base as arg
-    double calcTangentInterceptCoordinate(const CurveControlPoint& other) const;
+    CurvePoint(double xCoord, double yCoord) : x(xCoord), y(yCoord)
+    {}
 
-    // Extrapolate y coordinate using the set derivative.
-    CurveControlPoint calcExtrapolatedPoint(double xk) const;
+    double calcSecantLine(const CurvePoint& other) const;
 
-    // Returns false if members x, y, and dydx are uninitialized (equal to NaN).
-    explicit operator bool() const;
+    CurvePoint calcInterpolated(const CurvePoint& other, double u) const;
 
-    double x    = SimTK::NaN;
-    double y    = SimTK::NaN;
+    double x = SimTK::NaN;
+    double y = SimTK::NaN;
+};
+
+std::ostream& operator<<(std::ostream& os, const CurvePoint& pt);
+
+//==============================================================================
+//                  CURVE KNOT
+//==============================================================================
+
+class CurveKnot : public CurvePoint
+{
+public:
+    CurveKnot() = default;
+
+    CurveKnot(double xCoord, double yCoord, double derivative) :
+        CurvePoint(xCoord, yCoord), dydx(derivative)
+    {}
+
+    CurveKnot(CurvePoint point, double derivative) :
+        CurvePoint(point), dydx(derivative)
+    {}
+
     double dydx = SimTK::NaN;
 };
 
-std::ostream& operator<<(std::ostream& os, const CurveControlPoint& ctrlPt);
+std::ostream& operator<<(std::ostream& os, const CurveKnot& knot);
 
 //==============================================================================
 //              CURVY CONTROL POINT
 //==============================================================================
 
 // Control point with curviness parameter.
-class MuscleCurveControlPoint : public CurveControlPoint
+class MuscleCurveControlPoint final : public CurveKnot
 {
 public:
     MuscleCurveControlPoint() = default;
 
-    size_t calcCurvyPoints(
-        const MuscleCurveControlPoint& other,
-        std::vector<CurveControlPoint>& buffer) const;
+    // For checking if additional knots should be created.
+    bool isCurvy() const;
 
-    static constexpr double MAX_CURVINESS =
-        0.99; // TODO how to limit the curviness.
-
-    // Between 0 and MAX_CURVINESS.
-    double curviness =
-        SimTK::NaN; // TODO weird: last curviness of last point is invalid.
+    // TODO weird: last curviness of last point is invalid.
+    double curviness = SimTK::NaN;
 };
 
-std::ostream& operator<<(std::ostream& os, const MuscleCurveControlPoint& ctrlPt);
+std::ostream& operator<<(
+    std::ostream& os,
+    const MuscleCurveControlPoint& ctrlPt);
 
 //==============================================================================
 //              Cubic Spline
 //==============================================================================
+
 class CubicSpline
 {
 public:
     using Coefficients = std::array<double, 4>;
 
     CubicSpline() = default;
+
+    // Performs Hermite interpolation.
+    CubicSpline(
+        const CurveKnot& left,
+        const CurveKnot& right,
+        double& startIntegralValue);
 
     bool isMonotonic() const;
 
@@ -80,7 +128,7 @@ public:
 
     double calcIntegral(double x) const;
 
-    double calcEndIntegral() const;
+    CurveKnot calcKnot(double x) const;
 
     double x0 = SimTK::NaN;
     Coefficients coeff{SimTK::NaN, SimTK::NaN, SimTK::NaN, SimTK::NaN};
@@ -102,6 +150,13 @@ class CubicMonoSpline final : public CubicSpline
 public:
     explicit CubicMonoSpline(CubicSpline spline);
 
+    CubicMonoSpline(
+        const CurveKnot& left,
+        const CurveKnot& right,
+        double y0Integral) :
+        CubicMonoSpline(CubicSpline(left, right, y0Integral))
+    {}
+
 private:
     CubicMonoSpline() = default;
 
@@ -111,23 +166,76 @@ private:
             offsetof(CubicMonoSpline, x0) == 0,
             "x0 must be the first data member");
         static_assert(
-            offsetof(CubicMonoSpline, x1) == sizeof(CubicMonoSpline) - 8,
+            offsetof(CubicMonoSpline, x1) ==
+                sizeof(CubicMonoSpline) - sizeof(double),
             "x1 must be the last data member");
-        return sizeof(CubicMonoSpline) / 8;
+        return sizeof(CubicMonoSpline) / sizeof(double);
     }
 
     friend SmoothSegmentedCubicMonoSplineData;
+};
+
+std::ostream& operator<<(std::ostream& os, const CubicMonoSpline& spline);
+
+//==============================================================================
+//              QuadraticBezierCurve
+//==============================================================================
+class QuadraticBezierCurve
+{
+public:
+    QuadraticBezierCurve(const CurveKnot& left, const CurveKnot& right);
+
+    CurvePoint calcPoint(double u) const;
+
+    const CurveKnot& startKnot() const;
+    const CurveKnot& endKnot() const;
+
+private:
+    CurveKnot _start;
+    CurveKnot _end;
+    CubicSpline _x;
+    CubicSpline _y;
+};
+
+//==============================================================================
+//              Curve Shape
+//==============================================================================
+// If the user gives just a few control points of the curve, it is
+// anyones guess what the general shape of the curve is.
+// The CurveShape is constructed from a few curve knots, and can generate a
+// curve point at any x between the knots.
+//
+// Input knots must be monotonic.
+class CurveShape final
+{
+public:
+    explicit CurveShape(std::vector<MuscleCurveControlPoint> ctrlPts);
+
+    explicit CurveShape(std::vector<CurveKnot> knots);
+
+    const std::vector<QuadraticBezierCurve>& getSegments() const
+    {
+        return _segments;
+    }
+
+private:
+    std::vector<QuadraticBezierCurve> _segments;
 };
 
 //==============================================================================
 //                  SPLINE STORAGE
 //==============================================================================
 
+class SmoothSegmentedCubicMonoSpline;
+
 // C2 continuous segmented cubic monotonic spline storage.
 class SmoothSegmentedCubicMonoSplineData
 {
-public:
     SmoothSegmentedCubicMonoSplineData() = default;
+
+    explicit SmoothSegmentedCubicMonoSplineData(
+        const CurveShape& shape,
+        size_t maxNumSegments);
 
     explicit SmoothSegmentedCubicMonoSplineData(
         const std::vector<CubicMonoSpline>& splines);
@@ -139,25 +247,39 @@ public:
 
     const CubicMonoSpline& at(size_t index) const;
 
-    const CubicMonoSpline& findSegment(double x) const;
+    SimTK::Vec2 getDomain() const;
 
-private:
     std::vector<double> _data;
+
+    friend SmoothSegmentedCubicMonoSpline;
 };
 
 //==============================================================================
 //                  SMOOTH SEGMENTED CUBIC MONO SPLINE
 //==============================================================================
 
+// inserted gradient: dy/dx = 2 / ( DX0/DY0 + DX1/DY1), or zero if sign changed.
+
+// RULES:
+// - and control point with gradient set must be followed by one without
+// gradient set
+// - any missing griadient will receive inserted gradient
+// - control points must not violate mono-spline condition after all gradients
+// are set
+// - fit splines
+// - check if splines are monotonic
+// - check if splines are C1 continuous
+//
+// Resampling version:
+// - Sample a curve and using control points.
+// - Insert missing derivative values
+// - assert Monotonicity
 class SmoothSegmentedCubicMonoSpline
 {
 public:
     explicit SmoothSegmentedCubicMonoSpline(
-        std::vector<CubicMonoSpline>&& splines,
-        CurveControlPoint pStart,
-        CurveControlPoint pEnd);
-
-    explicit SmoothSegmentedCubicMonoSpline(std::vector<CurveControlPoint>&& pts);
+        const CurveShape& shape,
+        size_t maxNumSegments);
 
     explicit SmoothSegmentedCubicMonoSpline(
         const std::vector<MuscleCurveControlPoint>& pts);
@@ -166,13 +288,12 @@ public:
 
     double calcValue(double x) const;
 
+private:
     const CubicSpline& findInverseSegment(double y) const;
 
-private:
+    const CubicMonoSpline& findSegment(double x) const;
+
     SmoothSegmentedCubicMonoSplineData _splines;
-    CurveControlPoint _pStart;
-    CurveControlPoint _pEnd;
-    bool _extrapolateBeyondDomain = false;
 };
 
 } // namespace OpenSim
