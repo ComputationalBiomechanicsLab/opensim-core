@@ -214,15 +214,15 @@ OpenSim::CurvePoint calcInterceptPoint(
     const OpenSim::CurveKnot& left,
     const OpenSim::CurveKnot& right)
 {
-    opensim_assert(
-        std::abs(left.dydx - right.dydx) > SimTK::Eps,
-        "There is no intercept between knots.");
-
-    // Solve for x:
-    // y0 + (x - x0) * dydx0 = y1 + (x - x1) * dydx1
     const double x =
-        (right.y - left.y + left.x * left.dydx - right.x * right.dydx) /
-        (left.dydx - right.dydx);
+        std::abs(left.dydx - right.dydx) < SimTK::Eps ||
+                std::abs(left.y - right.y) < SimTK::Eps
+            // If zero gradient: take x between left and right.
+            ? left.x + (right.x - left.x) / 2.
+            // Solve for x:
+            // y0 + (x - x0) * dydx0 = y1 + (x - x1) * dydx1
+            : (right.y - left.y + left.x * left.dydx - right.x * right.dydx) /
+                  (left.dydx - right.dydx);
 
     const double yL = calcExtrapolated(left, x);
     const double yR = calcExtrapolated(right, x);
@@ -241,10 +241,10 @@ std::pair<OpenSim::CurveKnot, OpenSim::CurveKnot> calcCurvyEnforcingKnots(
     OpenSim::CurvePoint intercept = calcInterceptPoint(left, right);
 
     OpenSim::CurveKnot cLeft(
-        left.calcInterpolated(intercept, curviness),
+        left.calcInterpolated(intercept, 1. - curviness),
         left.dydx);
     OpenSim::CurveKnot cRight(
-        right.calcInterpolated(intercept, curviness),
+        right.calcInterpolated(intercept, 1. - curviness),
         right.dydx);
 
     return std::make_pair(cLeft, cRight);
@@ -473,7 +473,9 @@ std::ostream& operator<<(std::ostream& os, const CurveKnot& knot)
 
 bool MuscleCurveControlPoint::isCurvy() const
 {
-    return !SimTK::isNaN(curviness);
+    // TODO throw if oob.
+    return MIN_CURVINESS <= curviness
+        && curviness <= MAX_CURVINESS;
 }
 
 std::ostream& operator<<(

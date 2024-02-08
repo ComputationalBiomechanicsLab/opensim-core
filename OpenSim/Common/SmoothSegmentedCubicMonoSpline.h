@@ -92,6 +92,9 @@ public:
     // For checking if additional knots should be created.
     bool isCurvy() const;
 
+    static constexpr double MIN_CURVINESS=0.1;
+    static constexpr double MAX_CURVINESS=0.9;
+
     // TODO weird: last curviness of last point is invalid.
     double curviness = SimTK::NaN;
 };
