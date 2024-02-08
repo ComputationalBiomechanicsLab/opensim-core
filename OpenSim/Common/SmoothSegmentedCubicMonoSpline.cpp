@@ -361,44 +361,34 @@ std::vector<double> calcC1CubicMonoSplineUAlgo(
     const OpenSim::QuadraticBezierCurve& shape,
     size_t maxNumSegments)
 {
-    std::vector<double> newUs = {0., 0.25, 0.5, 1.};
-    std::vector<double> segmentsUs;
-    while (segmentsUs.size() != newUs.size()) {
-        segmentsUs = newUs;
-        newUs      = {segmentsUs.at(0)};
-        for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1;) {
-            // Lambda for replacing any missing derivatives.
+    std::vector<double> segmentsUs = {0., 0.25, 0.5, 1.};
+    for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1; ) {
+        const double uL = *it;
+        const OpenSim::CurveKnot& left =
+            calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
 
-            const double uL = *it;
-            const OpenSim::CurveKnot& left =
-                calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
+        const double uR = *++it;
+        const OpenSim::CurveKnot& right =
+            calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
 
-            const double uR = *++it;
-            const OpenSim::CurveKnot& right =
-                calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
-
-            bool segmentAccepted =
-                isHermiteInterpolantMonotonic(left, right, true);
-            if (segmentAccepted) {
-                double y0Integral = 0.;
-                OpenSim::CubicSpline s(left, right, y0Integral);
-                segmentAccepted &= shape.isAccurateWithinTol(s);
-            }
-
-            if (segmentAccepted) {
-                newUs.push_back(uR);
-                continue;
-            }
-
-            newUs.push_back((uL + uR) / 2.);
-            newUs.push_back(uR);
-
-            opensim_assert(
-                segmentsUs.size() <= maxNumSegments,
-                "Failed to create C1 cubic splines");
+        bool segmentAccepted = isHermiteInterpolantMonotonic(left, right, true);
+        if (segmentAccepted) {
+            double y0Integral = 0.;
+            OpenSim::CubicSpline s(left, right, y0Integral);
+            segmentAccepted &= shape.isAccurateWithinTol(s);
         }
+
+        if (segmentAccepted) {
+            continue;
+        }
+
+        it = --segmentsUs.insert(it, (uL + uR) / 2.);
+
+        opensim_assert(
+            segmentsUs.size() <= maxNumSegments,
+            "Failed to create C1 cubic splines");
     }
-    std::cout << "Succesfully fitted " << newUs.size()
+    std::cout << "Succesfully fitted " << segmentsUs.size()
               << " spline segments to curve shape using u = ";
     for (double u : segmentsUs) {
         std::cout << u << ", ";
