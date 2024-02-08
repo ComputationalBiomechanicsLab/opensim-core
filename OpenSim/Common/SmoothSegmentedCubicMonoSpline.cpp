@@ -377,7 +377,15 @@ std::vector<double> calcC1CubicMonoSplineUAlgo(
             const OpenSim::CurveKnot& right =
                 calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
 
-            if (isHermiteInterpolantMonotonic(left, right, true)) {
+            bool segmentAccepted =
+                isHermiteInterpolantMonotonic(left, right, true);
+            if (segmentAccepted) {
+                double y0Integral = 0.;
+                OpenSim::CubicSpline s(left, right, y0Integral);
+                segmentAccepted &= shape.isAccurateWithinTol(s);
+            }
+
+            if (segmentAccepted) {
                 newUs.push_back(uR);
                 continue;
             }
@@ -717,6 +725,12 @@ CurvePoint QuadraticBezierCurve::calcPoint(double u) const
     return {x, y};
 }
 
+double QuadraticBezierCurve::calcValue(double x) const
+{
+    const double u = _x.calcInverseValue(x);
+    return _y.calcValue(u);
+}
+
 const CurveKnot& QuadraticBezierCurve::startKnot() const
 {
     return _start;
@@ -725,6 +739,24 @@ const CurveKnot& QuadraticBezierCurve::startKnot() const
 const CurveKnot& QuadraticBezierCurve::endKnot() const
 {
     return _end;
+}
+
+bool OpenSim::QuadraticBezierCurve::isAccurateWithinTol(
+    const OpenSim::CubicSpline& spline) const
+{
+    for (size_t i = 0; i < nAccuracySamples; ++i) {
+        const double u =
+            static_cast<double>(i) / static_cast<double>(nAccuracySamples);
+        const double x     = spline.x0 + (spline.x1 - spline.x0) * u;
+        const double y     = calcValue(x);
+        const double error = y - spline.calcValue(x);
+        const double maxError =
+            std::max(std::abs(relAccuracy * y), absAccuracy);
+        if (std::abs(error) > maxError) {
+            return false;
+        }
+    }
+    return true;
 }
 
 //==============================================================================

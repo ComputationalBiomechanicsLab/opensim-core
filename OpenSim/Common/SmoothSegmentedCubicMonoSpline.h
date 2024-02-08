@@ -187,8 +187,16 @@ public:
 
     CurvePoint calcPoint(double u) const;
 
+    double calcValue(double x) const;
+
     const CurveKnot& startKnot() const;
     const CurveKnot& endKnot() const;
+
+    bool isAccurateWithinTol(const CubicSpline& spline) const;
+
+    double relAccuracy      = 1e-2;
+    double absAccuracy      = 1e-4;
+    size_t nAccuracySamples = 10;
 
 private:
     CurveKnot _start;
