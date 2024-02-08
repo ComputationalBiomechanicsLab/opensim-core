@@ -18,6 +18,20 @@ void opensim_assert(bool cond, std::string msg)
     }
 }
 
+template <typename Y, typename U, typename... Args>
+std::vector<Y> ConstructFromTwoElements(
+    const std::vector<U>& elements,
+    Args... args)
+{
+    std::vector<Y> y;
+    for (size_t i = 1; i < elements.size(); ++i) {
+        const U& left  = elements.at(i - 1);
+        const U& right = elements.at(i);
+        y.push_back(Y(left, right, args...));
+    }
+    return y;
+}
+
 //==============================================================================
 //                      CALCULATION HELPERS: C1-CONTINUITY CHECKS
 //==============================================================================
@@ -55,6 +69,28 @@ bool isC1Continuous(
     return isC1Continuous(left.calcKnot(left.x1), right);
 }
 
+bool isC1Continuous(const std::vector<OpenSim::CubicSpline>& splines)
+{
+    for (size_t i = 0; i + 1 < splines.size(); ++i) {
+        if (!isC1Continuous(splines[i], splines[i + 1])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool isC1Continuous(
+    const OpenSim::CurveKnot& startKnot,
+    const std::vector<OpenSim::CubicSpline>& splines,
+    const OpenSim::CurveKnot& endKnot)
+{
+    if (splines.empty()) {
+        return isC1Continuous(startKnot, endKnot);
+    }
+    return isC1Continuous(startKnot, splines.at(0)) &&
+           isC1Continuous(splines) && isC1Continuous(splines.back(), endKnot);
+}
+
 //==============================================================================
 //                      CALCULATION HELPERS: C2-CONTINUITY CHECKS
 //==============================================================================
@@ -64,8 +100,36 @@ bool isC2Continuous(
     const OpenSim::CubicSpline& right)
 {
     const double x = left.x1;
-    return isC1Continuous(left, right) &&
-           isNumEq(left.calcDerivative(x, 2), right.calcDerivative(x, 2));
+    return isC1Continuous(left, right) && isNumEq(
+                                              left.calcDerivative(x, 2),
+                                              right.calcDerivative(x, 2),
+                                              1e-10);
+}
+
+template<typename T>
+bool isC2Continuous(const std::vector<T>& splines)
+{
+    std::cout << "isC2Continuous : " << splines.size() << std::endl;
+    for (size_t i = 0; i + 1 < splines.size(); ++i) {
+    std::cout << "s : " << splines[i] << std::endl;
+        if (!isC2Continuous(splines[i], splines[i + 1])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template<typename T>
+bool isC2Continuous(
+    const OpenSim::CurveKnot& startKnot,
+    const std::vector<T>& splines,
+    const OpenSim::CurveKnot& endKnot)
+{
+    if (splines.empty()) {
+        return isC1Continuous(startKnot, endKnot);
+    }
+    return isC1Continuous(startKnot, splines.at(0)) &&
+           isC2Continuous(splines) && isC1Continuous(splines.back(), endKnot);
 }
 
 //==============================================================================
@@ -197,6 +261,168 @@ double calcBehavedMiddleDerivative(
                                (leftSecant < 0 && rightSecant > 0);
 
     return oppositeSigns ? 0. : (leftSecant + rightSecant) / 2.;
+}
+
+//==============================================================================
+//                      NATURAL SPLINE
+//==============================================================================
+
+std::vector<OpenSim::CurveKnot> calcNaturalCubicSplineKnots(
+    const std::vector<OpenSim::CurvePoint>& pts)
+{
+    const size_t n = pts.size() - 1;
+
+    std::vector<double> a;
+    a.reserve(n + 1);
+    for (const OpenSim::CurvePoint& p : pts)
+        a.push_back(p.y);
+
+    std::vector<double> b, d, h;
+    h.reserve(n);
+    b.reserve(n);
+    d.reserve(n);
+    for (size_t i = 0; i < n; ++i)
+        h.push_back(SimTK::NaN);
+    for (size_t i = 0; i < n; ++i)
+        b.push_back(SimTK::NaN);
+    for (size_t i = 0; i < n; ++i)
+        d.push_back(SimTK::NaN);
+    for (size_t i = 0; i < n; i++)
+        h[i] = pts[i + 1].x - pts[i].x;
+
+    std::vector<double> alpha;
+    alpha.reserve(n);
+    for (size_t i = 1; i < n; i++)
+        alpha[i] =
+            3.0 / h[i] * (a[i + 1] - a[i]) - 3.0 / h[i - 1] * (a[i] - a[i - 1]);
+
+    std::vector<double> c, l, mu, z;
+    c.reserve(n + 1);
+    for (size_t i = 0; i < n + 1; ++i)
+        c.push_back(SimTK::NaN);
+    l.reserve(n + 1);
+    z.reserve(n + 1);
+    mu.reserve(n + 1);
+    l[0] = 1, mu[0] = z[0] = 0;
+    for (size_t i = 1; i <= n; i++) {
+        l[i]  = 2 * (pts[i + 1].x - pts[i - 1].x) - h[i - 1] * mu[i - 1];
+        mu[i] = h[i] / l[i];
+        z[i]  = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
+    }
+    l[n] = 1.;
+    z[n] = 0.;
+    c[n] = 0.;
+    for (ptrdiff_t j = n - 1; j >= 0; --j) {
+        c[j] = z[j] - mu[j] * c[j + 1];
+        /* std::cout */
+        /*     << "\n    c[j] =  " << c[j] */
+        /*     << "\n    c[j+1] =  " << c[j+1] */
+        /*     << "\n    h[j] =  " << h[j] */
+        /*     << "\n    a[j] =  " << a[j] */
+        /*     << "\n    a[j+1] =  " << a[j+1] */
+        /*     << std::endl; */
+        b[j] = (a[j + 1] - a[j]) / h[j] - (h[j] * (c[j + 1] + 2. * c[j])) / 3.0;
+        d[j] = (c[j + 1] - c[j]) / (3.0 * h[j]);
+    }
+    std::cout << "\n    pts.size() = " << pts.size()
+              << "\n    a.size() = " << a.size()
+              << "\n    b.size() = " << b.size()
+              << "\n    c.size() = " << c.size()
+              << "\n    d.size() = " << d.size() << std::endl;
+    std::vector<OpenSim::CurveKnot> knots;
+    knots.reserve(n + 1);
+    for (size_t i = 0; i < n + 1; i++) {
+        double dydx = SimTK::NaN;
+        if (i == n) {
+            const double dx = pts.at(i).x - pts.at(i - 1).x;
+            dydx            = b.at(i - 1) + 2. * dx * c.at(i - 1) +
+                   3. * dx * dx * d.at(i - 1);
+        } else {
+            dydx = b.at(i);
+        }
+        auto knot = OpenSim::CurveKnot(pts[i], dydx);
+        knots.push_back(OpenSim::CurveKnot(pts[i], dydx));
+        std::cout << "k = " << knot << std::endl;
+        std::cout << "\n    i = " << i << "\n    a = " << a[i]
+                  << "\n    b = " << b[i] << "\n    c = " << c[i]
+                  << "\n    d = " << d[i] << std::endl;
+        /* output_set[i][0] = a[i]; */
+        /* output_set[i][1] = b[i]; */
+        /* output_set[i][2] = c[i]; */
+        /* output_set[i][3] = d[i]; */
+        /* output_set[i][4] = x[i]; */
+    }
+    return knots;
+}
+
+std::vector<OpenSim::CubicSpline> calcNaturalCubicSplines(
+    const OpenSim::QuadraticBezierCurve& shape,
+    const std::vector<double>& uVec)
+{
+    std::vector<OpenSim::CurvePoint> points;
+    points.reserve(uVec.size());
+    for (const double u : uVec) {
+        points.push_back(shape.calcPoint(u));
+    }
+
+    std::vector<OpenSim::CurveKnot> knots = calcNaturalCubicSplineKnots(points);
+
+    double y0Intgral = 0.;
+    std::vector<OpenSim::CubicSpline> splines =
+        ConstructFromTwoElements<OpenSim::CubicSpline>(knots, y0Intgral);
+    opensim_assert(
+        isC2Continuous(knots.at(0), splines, knots.back()),
+        "Failed C2 continuity check.");
+    std::cout << "Succesfully calculated natural spline" << std::endl;
+    return splines;
+}
+
+void calcNaturalCubicMonoSplines(
+    const OpenSim::QuadraticBezierCurve& shape,
+    std::vector<OpenSim::CubicMonoSpline>& monoSplines,
+    size_t maxNumSegments)
+{
+    std::vector<double> segmentsUs = {0., 1.};
+    segmentsUs.reserve(maxNumSegments + 1);
+
+    std::vector<OpenSim::CubicSpline> splines =
+        calcNaturalCubicSplines(shape, segmentsUs);
+
+    bool allSegmentsOk = false;
+    while (!allSegmentsOk) {
+        allSegmentsOk = true;
+
+        for (size_t i = 0; i < segmentsUs.size() - 1; ++i) {
+            const double uL = segmentsUs[i];
+            const double uR = segmentsUs[i + 1];
+
+            bool segmentAccepted = splines.at(i).isMonotonic() &&
+                                   shape.isAccurateWithinTol(splines.at(i));
+
+            allSegmentsOk &= segmentAccepted;
+
+            if (segmentAccepted) {
+                continue;
+            }
+
+            segmentsUs.insert(segmentsUs.begin() + i + 1, (uL + uR) / 2.);
+
+            splines = calcNaturalCubicSplines(shape, segmentsUs);
+
+            opensim_assert(
+                segmentsUs.size() <= maxNumSegments,
+                "Failed to fit natural cubic splines: Exceeded max number of segments.");
+        }
+    }
+    std::cout << "Succesfully fitted natural cubic splines using " << segmentsUs.size()
+              << " segments using u = ";
+    for (double u : segmentsUs) {
+        std::cout << u << ", ";
+    }
+    std::cout << " }" << std::endl;
+    for (const OpenSim::CubicSpline& s : splines) {
+        monoSplines.emplace_back(OpenSim::CubicMonoSpline(s));
+    }
 }
 
 //==============================================================================
@@ -362,7 +588,7 @@ std::vector<double> calcC1CubicMonoSplineUAlgo(
     size_t maxNumSegments)
 {
     std::vector<double> segmentsUs = {0., 0.25, 0.5, 1.};
-    for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1; ) {
+    for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1;) {
         const double uL = *it;
         const OpenSim::CurveKnot& left =
             calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
@@ -464,8 +690,7 @@ std::ostream& operator<<(std::ostream& os, const CurveKnot& knot)
 bool MuscleCurveControlPoint::isCurvy() const
 {
     // TODO throw if oob.
-    return MIN_CURVINESS <= curviness
-        && curviness <= MAX_CURVINESS;
+    return MIN_CURVINESS <= curviness && curviness <= MAX_CURVINESS;
 }
 
 std::ostream& operator<<(
@@ -617,17 +842,16 @@ SmoothSegmentedCubicMonoSplineData::SmoothSegmentedCubicMonoSplineData(
 {
     std::vector<CubicMonoSpline> splines;
     for (const QuadraticBezierCurve& shape : curveShape.getSegments()) {
-        calcC1CubicMonoSplineAlgo(shape, splines, maxNumSegments);
+        calcNaturalCubicMonoSplines(shape, splines, maxNumSegments);
     }
+    isC2Continuous(splines);
     *this = SmoothSegmentedCubicMonoSplineData(splines);
-    if (size() == 0) {
-        return;
-    }
 }
 
 SmoothSegmentedCubicMonoSplineData::SmoothSegmentedCubicMonoSplineData(
     const std::vector<CubicMonoSpline>& splines)
 {
+    isC2Continuous(splines);
     for (const CubicMonoSpline& s : splines) {
         appendChecked(s);
     }
@@ -783,17 +1007,17 @@ SmoothSegmentedCubicMonoSpline::SmoothSegmentedCubicMonoSpline(
 {
     for (auto& s : shape.getSegments()) {
         const auto pStart = s.calcPoint(0.);
-        std::cout << "pStart = " << pStart << ", yStart = " << calcValue(pStart.x) - pStart.y << std::endl;
         opensim_assert(
             isNumEq(calcValue(pStart.x), pStart.y),
             "Failed to construct CubicMonoSpline: Start Knot points not "
             "fitted.");
         const auto pEnd = s.calcPoint(1.);
-        std::cout << "pEnd = " << pEnd << ", yEnd = " << calcValue(pEnd.x) - pEnd.y << std::endl;
         opensim_assert(
             isNumEq(calcValue(pEnd.x), pEnd.y),
             "Failed to construct CubicMonoSpline: End Knot points not fitted.");
     }
+    std::cout << "Constructed SmoothSegmentedCubicMonoSpline using "
+              << _splines.size() << " segments\n";
 }
 
 SimTK::Vec2 SmoothSegmentedCubicMonoSpline::getDomain() const

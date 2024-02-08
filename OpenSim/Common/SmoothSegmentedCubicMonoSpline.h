@@ -290,7 +290,7 @@ class SmoothSegmentedCubicMonoSpline
 public:
     explicit SmoothSegmentedCubicMonoSpline(
         const CurveShape& shape,
-        size_t maxNumSegments);
+        size_t maxNumSegments = 100);
 
     explicit SmoothSegmentedCubicMonoSpline(
         const std::vector<MuscleCurveControlPoint>& pts);
