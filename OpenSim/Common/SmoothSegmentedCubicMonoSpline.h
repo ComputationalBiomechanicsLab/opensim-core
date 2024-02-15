@@ -1,6 +1,7 @@
 #ifndef OPENSIM_MUSCLECURVEPARAMS_H_
 #define OPENSIM_MUSCLECURVEPARAMS_H_
 
+#include "OpenSim/Common/SmoothSegmentedFunction.h"
 #include "SimTKmath.h"
 #include <array>
 #include <cstddef>
@@ -33,6 +34,10 @@ struct CurveKnot
         x(xCoord), y(yCoord), dydx(derivative)
     {}
 
+    CurveKnot(double xCoord, ValueAndDerivative valueAndDerivative):
+        x(xCoord), y(valueAndDerivative.value), dydx(valueAndDerivative.derivative)
+    {}
+
     double x    = SimTK::NaN;
     double y    = SimTK::NaN;
     double dydx = SimTK::NaN;
@@ -44,25 +49,26 @@ std::ostream& operator<<(std::ostream& os, const CurveKnot& knot);
 //              Curve Shape
 //==============================================================================
 
-class C2ContinuousSegmentedCurve
-{
-public:
-    //==========================================================================
-    //              Curve Shape Requirements
-    //==========================================================================
-    virtual double calcValue(double x) const                        = 0;
-    virtual double calcFirstDerivative(double x) const              = 0;
-    virtual std::vector<double> calcMonotonicSegmentXValues() const = 0;
+using C2ContinuousSegmentedCurve = SmoothSegmentedFunction;
+/* class C2ContinuousSegmentedCurve */
+/* { */
+/* public: */
+/*     //========================================================================== */
+/*     //              Curve Shape Requirements */
+/*     //========================================================================== */
+/*     virtual double calcValue(double x) const                        = 0; */
+/*     virtual double calcFirstDerivative(double x) const              = 0; */
+/*     virtual std::vector<double> calcMonotonicSegmentXValues() const = 0; */
 
-    virtual double calcDomainMax() const;
-    virtual double calcDomainMin() const;
+/*     virtual double calcDomainMax() const; */
+/*     virtual double calcDomainMin() const; */
 
-    //==========================================================================
-    //              Curve Shape Derived
-    //==========================================================================
+/*     //========================================================================== */
+/*     //              Curve Shape Derived */
+/*     //========================================================================== */
 
-    std::vector<OpenSim::CurveKnot> calcMonotonicSegmentKnots() const;
-};
+/*     std::vector<OpenSim::CurveKnot> calcMonotonicSegmentKnots() const; */
+/* }; */
 
 //==============================================================================
 //              Cubic Spline
@@ -136,7 +142,7 @@ public:
     explicit SmoothSegmentedCubicMonoSpline(
         const C2ContinuousSegmentedCurve& curve,
         size_t maxNumSegments = 100,
-        double accuracy       = 1e-4);
+        double accuracy       = 1e-3);
 
     SimTK::Vec2 getDomain() const;
 

@@ -1041,4 +1041,13 @@ void SmoothSegmentedFunction::
     datafile.close();
 } 
 
-
+std::vector<double> SmoothSegmentedFunction::calcMonotonicSegmentXValues() const
+{
+    std::vector<double> values;
+    for (const SimTK::Vec6& ctrlPtsX : _smoothData->_ctrlPtsX)
+    {
+        values.push_back(ctrlPtsX(0));
+    }
+    values.push_back(_smoothData->_x1);
+    return values;
+}
