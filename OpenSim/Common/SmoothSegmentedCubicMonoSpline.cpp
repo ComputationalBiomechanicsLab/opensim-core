@@ -39,6 +39,27 @@ std::vector<Y> ConstructFromTwoElements(
     return y;
 }
 
+struct X0Coordinate
+{
+    X0Coordinate(double xCoordinate) : x(xCoordinate)
+    {}
+
+    X0Coordinate(const OpenSim::CubicMonoSpline& spline) : x(spline.x0)
+    {}
+    double x;
+};
+
+struct Y0Coordinate
+{
+    Y0Coordinate(double yCoordinate) : y(yCoordinate)
+    {}
+
+    Y0Coordinate(const OpenSim::CubicMonoSpline& spline) :
+        y(spline.coeff.front())
+    {}
+    double y;
+};
+
 //==============================================================================
 //                      CALCULATION HELPERS: C1-CONTINUITY CHECKS
 //==============================================================================
@@ -229,6 +250,25 @@ bool isHermiteInterpolantMonotonic(
         strict);
 }
 
+bool isInvertible(const std::vector<OpenSim::CubicMonoSpline>& splines)
+{
+
+    auto CalcDirection = [](const OpenSim::CubicMonoSpline& left,
+                            const OpenSim::CubicMonoSpline& right) {
+        const double x = right.x0;
+        return left.calcValue(x) < right.calcValue(x);
+    };
+
+    bool increasing = false;
+    bool decreasing = false;
+    for (auto s = splines.begin(); s + 1 != splines.end(); ++s) {
+        increasing |= CalcDirection(*s, *(s + 1));
+        decreasing |= CalcDirection(*(s + 1), *s);
+    }
+
+    return increasing != decreasing;
+}
+
 //==============================================================================
 //                      HERMITE INTERPOLATION
 //==============================================================================
@@ -253,12 +293,39 @@ OpenSim::CubicSpline::Coefficients calcCubicHermiteSplineCoeffs(
     };
 }
 
+double calcDerivativeFromSplineCoefficients(
+    const OpenSim::CubicSpline::Coefficients& coeff,
+    double x0,
+    double x,
+    size_t order)
+{
+    double dx = x - x0;
+
+    if (std::isnan(dx)) {
+        return SimTK::NaN;
+    }
+
+    switch (order) {
+    case 0:
+        return coeff.at(0) +
+               dx * (coeff.at(1) + dx * (coeff.at(2) + dx * coeff.at(3)));
+    case 1:
+        return coeff.at(1) + dx * (2. * coeff.at(2) + dx * (3. * coeff.at(3)));
+    case 2:
+        return 2. * coeff.at(2) + dx * (6. * coeff.at(3));
+    case 3:
+        return 6. * coeff.at(3);
+    default:
+        return 0.;
+    };
+}
+
 //==============================================================================
 //                      MAX DIFFERENCE BETEEN SHAPE AND SPLINE
 //==============================================================================
 
 double calcMaxAbsDifference(
-    const OpenSim::CurveShape& shape,
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
     const OpenSim::CubicSpline& spline,
     double maxFitError,
     double xEstimate,
@@ -273,11 +340,11 @@ double calcMaxAbsDifference(
         xEstimate = std::min(std::max(xEstimate, spline.x0), spline.x1);
         // Compute difference between spline and curve.
         const double diff =
-            shape.calcValue(xEstimate) - spline.calcValue(xEstimate);
+            curve.calcValue(xEstimate) - spline.calcValue(xEstimate);
         const double absDiff              = std::abs(diff);
         const bool largerThanAllowedError = absDiff > maxFitError;
         // Compute gradient of difference.
-        const double diffDerivative = shape.calcFirstDerivative(xEstimate) -
+        const double diffDerivative = curve.calcFirstDerivative(xEstimate) -
                                       spline.calcDerivative(xEstimate, 1);
         // Stop if larger than allowed error, or out-of-bounds or if converged.
         if (largerThanAllowedError || oob || absDiff < eps ||
@@ -295,7 +362,7 @@ double calcMaxAbsDifference(
 }
 
 double calcMaxAbsDifference(
-    const OpenSim::CurveShape& shape,
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
     const OpenSim::CubicSpline& spline,
     double maxFitError,
     size_t maxIter = MAX_ITER,
@@ -309,7 +376,7 @@ double calcMaxAbsDifference(
                                              static_cast<double>(searchGrid) *
                                              static_cast<double>(i);
         const double absDiff =
-            std::abs(spline.calcValue(xEstimate) - shape.calcValue(xEstimate));
+            std::abs(spline.calcValue(xEstimate) - curve.calcValue(xEstimate));
         if (absDiff > maxAbsDiff) {
             xEstimate = xTest;
         }
@@ -320,7 +387,7 @@ double calcMaxAbsDifference(
     std::cout << "calcMaxAbsDifference:"
               << "maxDiffGrid = " << maxAbsDiff << ", ";
     maxAbsDiff = calcMaxAbsDifference(
-        shape,
+        curve,
         spline,
         maxFitError,
         xEstimate,
@@ -331,96 +398,20 @@ double calcMaxAbsDifference(
 }
 
 //==============================================================================
-//                      ????
-//==============================================================================
-
-double calcFittingErrorBound(const OpenSim::CurveShape& shape, double accuracy)
-{
-    return accuracy * std::max(
-                          std::abs(shape.calcValue(shape.calcDomainMax())),
-                          std::abs(shape.calcValue(shape.calcDomainMin())));
-}
-
-bool evaluateSpline(
-    const OpenSim::CurveShape& shape,
-    const OpenSim::CurveKnot& left,
-    const OpenSim::CurveKnot& right,
-    double maxFitError)
-{
-    const bool isMonotonic = isHermiteInterpolantMonotonic(left, right, true);
-    // TODO add constructor without integral value?
-    // class IntegrableCubicSpline
-    double y0Integral = 0.;
-    const OpenSim::CubicSpline spline(left, right, y0Integral);
-    const bool isAccurate = calcMaxAbsDifference(shape, spline, maxFitError) < maxFitError;
-    return isMonotonic && isAccurate;
-}
-
-bool updateGrid(
-    std::vector<OpenSim::CurveKnot> knots,
-    const OpenSim::CurveShape& shape,
-    double maxFittingError,
-    size_t maxNumSegments)
-{
-    bool wasUpdated = false;
-    for (size_t i = 0; i + 1 < knots.size(); ++i) {
-        const OpenSim::CurveKnot& left  = knots.at(i);
-        const OpenSim::CurveKnot& right = knots.at(i + 1);
-        if (evaluateSpline(shape, left, right, maxFittingError)) {
-            // Nothing to do if requirements were met.
-            continue;
-        }
-        // Did not meet the requirements: need to split this segment.
-        wasUpdated = true;
-
-        // Add new node to the grid in middle of left and right node:
-        const double x = (knots.at(i).x + knots.at(i + 1).x) / 2.;
-        knots.insert(knots.begin() + ++i, shape.calcKnot(x));
-
-        // Throw if we exceed the max number of allowed segments.
-        opensim_assert(
-            knots.size() + 1 > maxNumSegments,
-            "Failed to refine shape-segment-grid: Exceeded mux number "
-            "of segments");
-    }
-    return wasUpdated;
-}
-
-//==============================================================================
-//                      MONO HERMITE INTERPOLATION
-//==============================================================================
-
-double calcBehavedMiddleDerivative(
-    const OpenSim::CurvePoint& left,
-    const OpenSim::CurvePoint& mid,
-    const OpenSim::CurvePoint& right)
-{
-    const double leftSecant  = left.calcSecantLine(mid);
-    const double rightSecant = right.calcSecantLine(mid);
-    /* std::cout << "leftSecant = " << leftSecant << std::endl; */
-    /* std::cout << "rightSecant = " << rightSecant << std::endl; */
-
-    const bool oppositeSigns = (leftSecant > 0 && rightSecant < 0) ||
-                               (leftSecant < 0 && rightSecant > 0);
-
-    return oppositeSigns ? 0. : (leftSecant + rightSecant) / 2.;
-}
-
-//==============================================================================
 //                      NATURAL SPLINE
 //==============================================================================
 
-void calcNaturalCubicSplineKnotDerivatives(
-    std::function<const OpenSim::CurvePoint&(size_t i)> getCurvePoint,
-    std::function<double&(size_t i)> updCurvePointDerivative,
-    size_t nPoints)
+// Overwrites the derivative values at the knots.
+std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
+    std::vector<OpenSim::CurveKnot>& knots)
 {
-    const size_t n = nPoints - 1;
+    const size_t nPoints = knots.size();
+    const size_t n       = nPoints - 1;
 
     std::vector<double> a;
     a.reserve(n + 1);
     for (size_t i = 0; i < nPoints; ++i)
-        a.push_back(getCurvePoint(i).y);
+        a.push_back(knots.at(i).y);
 
     std::vector<double> b, d, h;
     h.reserve(n);
@@ -433,7 +424,7 @@ void calcNaturalCubicSplineKnotDerivatives(
     for (size_t i = 0; i < n; ++i)
         d.push_back(SimTK::NaN);
     for (size_t i = 0; i < n; i++)
-        h[i] = getCurvePoint(i + 1).x - getCurvePoint(i).x;
+        h[i] = knots.at(i + 1).x - knots.at(i).x;
 
     std::vector<double> alpha;
     alpha.reserve(n);
@@ -450,8 +441,8 @@ void calcNaturalCubicSplineKnotDerivatives(
     mu.reserve(n + 1);
     l[0] = 1, mu[0] = z[0] = 0;
     for (size_t i = 1; i <= n; i++) {
-        l[i] = 2. * (getCurvePoint(i + 1).x - getCurvePoint(i - 1).x) -
-               h[i - 1] * mu[i - 1];
+        l[i] =
+            2. * (knots.at(i + 1).x - knots.at(i - 1).x) - h[i - 1] * mu[i - 1];
         mu[i] = h[i] / l[i];
         z[i]  = (alpha[i] - h[i - 1] * z[i - 1]) / l[i];
     }
@@ -465,239 +456,141 @@ void calcNaturalCubicSplineKnotDerivatives(
     }
     for (size_t i = 0; i < nPoints; ++i) {
         if (i == n) {
-            const double dx = getCurvePoint(i).x - getCurvePoint(i - 1).x;
-            updCurvePointDerivative(i) = b.at(i - 1) + 2. * dx * c.at(i - 1) +
-                                         3. * dx * dx * d.at(i - 1);
+            const double dx  = knots.at(i).x - knots.at(i - 1).x;
+            knots.at(i).dydx = b.at(i - 1) + 2. * dx * c.at(i - 1) +
+                               3. * dx * dx * d.at(i - 1);
         } else {
-            updCurvePointDerivative(i) = b.at(i);
+            knots.at(i).dydx = b.at(i);
         }
     }
-}
-
-void calcNaturalCubicSplineKnotDerivatives(
-    std::vector<OpenSim::CurveKnot>& knots)
-{
-    calcNaturalCubicSplineKnotDerivatives(
-        [&](size_t idx) -> const OpenSim::CurvePoint& { return knots.at(idx); },
-        [&](size_t idx) -> double& { return knots.at(idx).dydx; },
-        knots.size());
-}
-
-//==============================================================================
-//                      PROCESSING CURVINESS
-//==============================================================================
-
-// Extrapolated y coordinate using the knot derivative.
-double calcExtrapolated(const OpenSim::CurveKnot& knot, double x)
-{
-    return knot.y + knot.dydx * (x - knot.x);
-}
-
-// Calculate the point where the knots intersect when extrapolated.
-OpenSim::CurvePoint calcInterceptPoint(
-    const OpenSim::CurveKnot& left,
-    const OpenSim::CurveKnot& right)
-{
-    const double x =
-        std::abs(left.dydx - right.dydx) < SimTK::Eps ||
-                std::abs(left.y - right.y) < SimTK::Eps
-            // If zero gradient: take x between left and right.
-            ? left.x + (right.x - left.x) / 2.
-            // Solve for x:
-            // y0 + (x - x0) * dydx0 = y1 + (x - x1) * dydx1
-            : (right.y - left.y + left.x * left.dydx - right.x * right.dydx) /
-                  (left.dydx - right.dydx);
-
-    const double yL = calcExtrapolated(left, x);
-    const double yR = calcExtrapolated(right, x);
-
-    opensim_assert(isNumEq(yL, yR), "error computing intercept point");
-
-    return {x, yL};
-}
-
-// Calculate the intermediate knots that enforce the curviness.
-std::pair<OpenSim::CurveKnot, OpenSim::CurveKnot> calcCurvyEnforcingKnots(
-    const OpenSim::CurveKnot& left,
-    const OpenSim::CurveKnot& right,
-    double curviness)
-{
-    OpenSim::CurvePoint intercept = calcInterceptPoint(left, right);
-
-    OpenSim::CurveKnot cLeft(
-        left.calcInterpolated(intercept, 1. - curviness),
-        left.dydx);
-    OpenSim::CurveKnot cRight(
-        right.calcInterpolated(intercept, 1. - curviness),
-        right.dydx);
-
-    return std::make_pair(cLeft, cRight);
-}
-
-// Calculate control knots from curvy control points.
-// TODO awkward that curviness is between knots... one is ignored.
-std::vector<OpenSim::CurveKnot> calcKnotsFromControlPoints(
-    const std::vector<OpenSim::MuscleCurveControlPoint>& ctrlPts)
-{
-    std::vector<OpenSim::CurveKnot> knots;
-
-    for (auto p = ctrlPts.begin(); p != ctrlPts.end(); p++) {
-        // Push all control points as knots.
-        auto left = p;
-        knots.push_back(*left);
-
-        // Check if the curviness between this and the next knot is set.
-        auto right = p + 1;
-        if (right == ctrlPts.end() || !(*right).isCurvy()) {
-            continue;
-        }
-
-        // Insert the extra knots that enforce the curviness.
-        auto curvyPoints =
-            calcCurvyEnforcingKnots(*left, *right, (*right).curviness);
-        knots.push_back(curvyPoints.first);
-        knots.push_back(curvyPoints.second);
-    }
-
     return knots;
 }
 
 //==============================================================================
-//                      QUADRATIC BEZIER FITTING
+//                  FINDING THE APPROXOMATING SPLINE SEGMENTS
 //==============================================================================
 
-OpenSim::CubicSpline calcCubicSplineFromQuadraticBezier(
-    double p0,
-    double p1,
-    double p2)
+double calcFittingErrorBound(
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
+    double accuracy)
 {
-    OpenSim::CubicSpline s;
-    s.x0         = 0.;
-    s.x1         = 1.;
-    s.y0Integral = 0.;
-    // B(t) = P1 + (1-t)^2(P0-P1) + t^2(P2-P1)
-    s.coeff = {p0, 2. * (p1 - p0), p0 - 2. * p1 + p2, 0.};
-    return s;
+    return accuracy * std::max(
+                          std::abs(curve.calcValue(curve.calcDomainMax())),
+                          std::abs(curve.calcValue(curve.calcDomainMin())));
 }
 
-std::pair<OpenSim::CubicSpline, OpenSim::CubicSpline> calcQuadraticBezierSpline(
+bool evaluateSpline(
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
     const OpenSim::CurveKnot& left,
-    const OpenSim::CurveKnot& right)
+    const OpenSim::CurveKnot& right,
+    double maxFitError)
 {
-    const SimTK::Vec2 p0{left.x, left.y};
-
-    const OpenSim::CurvePoint mid = calcInterceptPoint(left, right);
-    const SimTK::Vec2 p1{mid.x, mid.y};
-
-    const SimTK::Vec2 p2{right.x, right.y};
-
-    opensim_assert(
-        left.x < mid.x && mid.x < right.x,
-        "Intercept line falls outside of convex area on x-axis");
-
-    opensim_assert(
-        std::min(left.y, right.y) - 1e-13 < mid.y &&
-            mid.y < std::max(left.y, right.y) + 1e-13,
-        "Intercept line falls outside of convex area on y-axis");
-
-    return std::make_pair(
-        calcCubicSplineFromQuadraticBezier(p0[0], p1[0], p2[0]),
-        calcCubicSplineFromQuadraticBezier(p0[1], p1[1], p2[1]));
+    const bool isMonotonic = isHermiteInterpolantMonotonic(left, right, true);
+    // TODO add constructor without integral value?
+    // class IntegrableCubicSpline
+    double y0Integral = 0.;
+    const OpenSim::CubicSpline spline(left, right, y0Integral);
+    const bool isAccurate =
+        calcMaxAbsDifference(curve, spline, maxFitError) < maxFitError;
+    return isMonotonic && isAccurate;
 }
 
-//==============================================================================
-//                      C1 MONO CUBIC SPLINE ALGO
-//==============================================================================
-
-OpenSim::CurveKnot calcCurveKnotWithMeanDerivative(
-    const OpenSim::CurvePoint& left,
-    const OpenSim::CurvePoint& mid,
-    const OpenSim::CurvePoint& right)
-{
-    const double left_dx = mid.x - left.x;
-    const double left_dy = mid.y - left.y;
-
-    const double right_dx = mid.x - right.x;
-    const double right_dy = mid.y - right.y;
-
-    const double dydx = calcBehavedMiddleDerivative(left, mid, right);
-    return {mid, dydx};
-}
-
-OpenSim::CurveKnot calcCurveKnotWithMeanDerivative(
-    const OpenSim::QuadraticBezierCurve shape,
-    const std::vector<double>& segmentsUs,
-    const std::vector<double>::iterator iter)
-{
-    if (iter == segmentsUs.begin()) {
-        return shape.startKnot();
-    }
-    if (iter + 1 == segmentsUs.end()) {
-        return shape.endKnot();
-    }
-    return calcCurveKnotWithMeanDerivative(
-        shape.calcPoint(*(iter - 1)),
-        shape.calcPoint(*iter),
-        shape.calcPoint(*(iter + 1)));
-}
-
-std::vector<double> calcC1CubicMonoSplineUAlgo(
-    const OpenSim::QuadraticBezierCurve& shape,
+bool updateGrid(
+    std::vector<OpenSim::CurveKnot> knots,
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
+    double maxFittingError,
     size_t maxNumSegments)
 {
-    std::vector<double> segmentsUs = {0., 0.25, 0.5, 1.};
-    for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1;) {
-        const double uL = *it;
-        const OpenSim::CurveKnot& left =
-            calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
-
-        const double uR = *++it;
-        const OpenSim::CurveKnot& right =
-            calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
-
-        bool segmentAccepted = isHermiteInterpolantMonotonic(left, right, true);
-        if (segmentAccepted) {
-            double y0Integral = 0.;
-            OpenSim::CubicSpline s(left, right, y0Integral);
-            segmentAccepted &= shape.isAccurateWithinTol(s);
-        }
-
-        if (segmentAccepted) {
+    bool wasUpdated = false;
+    for (size_t i = 0; i + 1 < knots.size(); ++i) {
+        const OpenSim::CurveKnot& left  = knots.at(i);
+        const OpenSim::CurveKnot& right = knots.at(i + 1);
+        if (evaluateSpline(curve, left, right, maxFittingError)) {
+            // Nothing to do if requirements were met.
             continue;
         }
+        // Did not meet the requirements: need to split this segment.
+        wasUpdated = true;
 
-        it = --segmentsUs.insert(it, (uL + uR) / 2.);
+        // Add new node to the grid in middle of left and right node:
+        const double x = (knots.at(i).x + knots.at(i + 1).x) / 2.;
+        const OpenSim::CurveKnot knot = {
+            x,
+            curve.calcValue(x),
+            curve.calcFirstDerivative(x)};
+        knots.insert(knots.begin() + ++i, knot);
 
+        // Throw if we exceed the max number of allowed segments.
         opensim_assert(
-            segmentsUs.size() <= maxNumSegments,
-            "Failed to create C1 cubic splines");
+            knots.size() + 1 > maxNumSegments,
+            "Failed to refine curve-segment-grid: Exceeded mux number "
+            "of segments");
     }
-    std::cout << "Succesfully fitted " << segmentsUs.size()
-              << " spline segments to curve shape using u = ";
-    for (double u : segmentsUs) {
-        std::cout << u << ", ";
-    }
-    std::cout << " }" << std::endl;
-    return segmentsUs;
+    return wasUpdated;
 }
 
-void calcC1CubicMonoSplineAlgo(
-    const OpenSim::QuadraticBezierCurve& shape,
-    std::vector<OpenSim::CubicMonoSpline>& splines,
+std::vector<OpenSim::CubicMonoSpline> calcSplineApproximationToCurve(
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
+    double accuracy,
     size_t maxNumSegments)
 {
-    std::vector<double> segmentsUs =
-        calcC1CubicMonoSplineUAlgo(shape, maxNumSegments);
-    for (auto it = segmentsUs.begin(); it < segmentsUs.end() - 1;) {
-        const OpenSim::CurveKnot& left =
-            calcCurveKnotWithMeanDerivative(shape, segmentsUs, it);
-        const OpenSim::CurveKnot& right =
-            calcCurveKnotWithMeanDerivative(shape, segmentsUs, ++it);
+    // Convert the accuracy to a max allowed fitting error.
+    const double maxFitError = calcFittingErrorBound(curve, accuracy);
 
-        const double y0Integral =
-            splines.empty() ? 0. : splines.end()--->calcIntegral(right.x);
-        splines.push_back({left, right, y0Integral});
+    // Use the curve segments as the initial guess for the spline knots.
+    std::vector<OpenSim::CurveKnot> splineKnots =
+        curve.calcMonotonicSegmentKnots();
+
+    // Iteratively compute the natural spline, and refine the grid if needed.
+    while (updateGrid(
+        calcNaturalCubicSplineKnotDerivatives(splineKnots),
+        curve,
+        maxFitError,
+        maxNumSegments)) {
     }
+
+    // Compute the Hermite interpolant connecting the knots.
+    double y0Integral = 0.;
+    std::vector<OpenSim::CubicMonoSpline> splines =
+        ConstructFromTwoElements<OpenSim::CubicMonoSpline>(
+            splineKnots,
+            y0Integral);
+
+    // Verify that final spline segments are continuous.
+    opensim_assert(
+        isC2Continuous(splineKnots.front(), splines, splineKnots.back()),
+        "C2 continuity check of spline segments failed");
+    return splines;
+}
+
+//==============================================================================
+//                      SOLVING DIFFERENTIABLE EQUATION
+//==============================================================================
+
+double solveDiffentiableScalarEquation(
+    const std::function<OpenSim::ValueAndDerivative(double)>& lhs,
+    const std::function<OpenSim::ValueAndDerivative(double)>& rhs,
+    double xEstimate,
+    size_t maxIter,
+    double eps)
+{
+    for (size_t i = 0; i < maxIter; ++i) {
+        // Compute difference between spline and curve.
+        const OpenSim::ValueAndDerivative error =
+            lhs(xEstimate) - rhs(xEstimate);
+        // Stop if larger than allowed error, or out-of-bounds or if converged.
+        if (error.value < eps || error.derivative < eps) {
+            return xEstimate;
+        }
+        // Take step to minimize the difference.
+        const double step = -error.value / error.derivative;
+        xEstimate += step;
+    }
+
+    // TODO use opensim_assert
+    throw std::runtime_error(
+        "Failed to solve SmoothSegmentedCubicMonoSpline::calcValue(x) = rhs(x) "
+        "for x");
 }
 
 } // namespace
@@ -706,27 +599,16 @@ namespace OpenSim
 {
 
 //==============================================================================
-//                      CURVE POINT
+//                      VALUE AND DERIVATIVE
 //==============================================================================
 
-double CurvePoint::calcSecantLine(const CurvePoint& other) const
+ValueAndDerivative operator-(
+    const ValueAndDerivative& lhs,
+    const ValueAndDerivative& rhs)
 {
-    return (other.y - y) / (other.x - x);
-}
-
-CurvePoint CurvePoint::calcInterpolated(const CurvePoint& other, double u) const
-{
-    return {
-        x + (other.x - x) * u,
-        y + (other.y - y) * u,
-    };
-}
-
-std::ostream& operator<<(std::ostream& os, const CurvePoint& pt)
-{
-    return os << "CurvePoint{"
-              << "x: " << pt.x << ", "
-              << "y: " << pt.y << "}";
+    return ValueAndDerivative{
+        lhs.value - rhs.value,
+        lhs.derivative - rhs.derivative};
 }
 
 //==============================================================================
@@ -739,27 +621,6 @@ std::ostream& operator<<(std::ostream& os, const CurveKnot& knot)
               << "x: " << knot.x << ", "
               << "y: " << knot.y << ", "
               << "dydx: " << knot.dydx << "}";
-}
-
-//==============================================================================
-//                      MUSCLE CURVE CONTROL POINT
-//==============================================================================
-
-bool MuscleCurveControlPoint::isCurvy() const
-{
-    // TODO throw if oob.
-    return MIN_CURVINESS <= curviness && curviness <= MAX_CURVINESS;
-}
-
-std::ostream& operator<<(
-    std::ostream& os,
-    const MuscleCurveControlPoint& ctrlPt)
-{
-    return os << "MuscleCurveControlPoint{"
-              << "x: " << ctrlPt.x << ", "
-              << "y: " << ctrlPt.y << ", "
-              << "dydx: " << ctrlPt.dydx << ", "
-              << "curviness: " << ctrlPt.curviness << "}";
 }
 
 //==============================================================================
@@ -785,70 +646,59 @@ CubicSpline::CubicSpline(
 
 bool CubicSpline::isMonotonic() const
 {
-    const double dx    = x1 - x0;
-    const double dy    = calcValue(x1) - calcValue(x0);
-    const double dydx0 = calcDerivative(x0, 1);
-    const double dydx1 = calcDerivative(x1, 1);
-    const bool mono    = isHermiteInterpolantMonotonic(dx, dy, dydx0, dydx1);
-
-    /* bool checkMono = true; */
-    /* for (size_t i = 0; i < 1000; ++i) { */
-    /*     checkMono &= */
-    /*     calcDerivative(x0 + dx / 1000. * static_cast<double>(i),1) * dy >=
-     * 0.; */
-    /* } */
-    /* opensim_assert(checkMono == mono, "failed to verify Monotonicity"); */
-
-    return mono;
-}
-
-double CubicSpline::calcDerivative(double x, size_t order) const
-{
-    if (std::isnan(x)) {
-        return SimTK::NaN;
-    }
-
-    double dx = x - x0;
-    switch (order) {
-    case 0:
-        return coeff.at(0) +
-               dx * (coeff.at(1) + dx * (coeff.at(2) + dx * coeff.at(3)));
-    case 1:
-        return coeff.at(1) + dx * (2. * coeff.at(2) + dx * (3. * coeff.at(3)));
-    case 2:
-        return 2. * coeff.at(2) + dx * (6. * coeff.at(3));
-    case 3:
-        return 6. * coeff.at(3);
-    default:
-        return 0.;
-    };
+    return isHermiteInterpolantMonotonic(calcKnot(x0), calcKnot(x1));
 }
 
 double CubicSpline::calcValue(double x) const
 {
-    return calcDerivative(x, 0);
+    return calcDerivativeFromSplineCoefficients(coeff, x0, x, 0);
+}
+
+double CubicSpline::calcDerivative(double x, size_t order) const
+{
+    return calcDerivativeFromSplineCoefficients(coeff, x0, x, order);
+}
+
+ValueAndDerivative CubicSpline::calcValueAndDerivative(double x) const
+{
+    return {
+        calcDerivativeFromSplineCoefficients(coeff, x0, x, 0),
+        calcDerivativeFromSplineCoefficients(coeff, x0, x, 1)};
 }
 
 CurveKnot CubicSpline::calcKnot(double x) const
 {
-    return {x, calcValue(x), calcDerivative(x, 1)};
+    return {
+        x,
+        calcDerivativeFromSplineCoefficients(coeff, x0, x, 0),
+        calcDerivativeFromSplineCoefficients(coeff, x0, x, 1)};
 }
 
 double CubicSpline::calcInverseValue(double y, double eps, size_t maxIter) const
 {
-    double xEstimate = (x1 + x0) / 2.;
-    double yEstimate = SimTK::NaN;
-    double yError    = SimTK::Infinity;
-    for (size_t i = 0;
-         std::abs(yError = (y - (yEstimate = calcValue(xEstimate)))) > eps &&
-         i < maxIter;
-         ++i) {
-        const double xStep = yError / calcDerivative(xEstimate, 1);
-        xEstimate += xStep;
-    }
+    return solveDiffentiableScalarEquation(
+        [&](double x) { return calcValueAndDerivative(x); },
+        [=](double) -> ValueAndDerivative {
+            return {y, 0.};
+        },
+        (x1 + x0) / 2.,
+        maxIter,
+        eps);
+    /* double xEstimate = (x1 + x0) / 2.; */
+    /* double yEstimate = SimTK::NaN; */
+    /* double yError    = SimTK::Infinity; */
+    /* for (size_t i = 0; */
+    /*      std::abs(yError = (y - (yEstimate = calcValue(xEstimate)))) > eps &&
+     */
+    /*      i < maxIter; */
+    /*      ++i) { */
+    /*     const double xStep = yError / calcDerivative(xEstimate, 1); */
+    /*     xEstimate += xStep; */
+    /* } */
 
-    opensim_assert(std::abs(yError) < eps, "Failed to invert spline segment");
-    return xEstimate;
+    /* opensim_assert(std::abs(yError) < eps, "Failed to invert spline
+     * segment"); */
+    /* return xEstimate; */
 }
 
 double CubicSpline::calcIntegral(double x) const
@@ -891,167 +741,26 @@ std::ostream& operator<<(std::ostream& os, const CubicMonoSpline& spline)
 }
 
 //==============================================================================
-//                      Cubic Mono Spline Storage
-//==============================================================================
-
-SmoothSegmentedCubicMonoSplineData::SmoothSegmentedCubicMonoSplineData(
-    const CurveShape& curveShape,
-    size_t maxNumSegments)
-{
-    std::vector<CubicMonoSpline> splines;
-    for (const QuadraticBezierCurve& shape : curveShape.getSegments()) {
-        calcNaturalCubicMonoSplines(shape, splines, maxNumSegments);
-    }
-    isC2Continuous(splines);
-    *this = SmoothSegmentedCubicMonoSplineData(splines);
-}
-
-SmoothSegmentedCubicMonoSplineData::SmoothSegmentedCubicMonoSplineData(
-    const std::vector<CubicMonoSpline>& splines)
-{
-    isC2Continuous(splines);
-    for (const CubicMonoSpline& s : splines) {
-        appendChecked(s);
-    }
-}
-
-void SmoothSegmentedCubicMonoSplineData::appendChecked(CubicMonoSpline spline)
-{
-    // Verify that segments are C1 continuous.
-    if (size() > 0) {
-        opensim_assert(
-            isC1Continuous(at(size() - 1), spline),
-            "Segment node C1 continuity check failed");
-    }
-
-    // x1 of last segment is same as x0 of first segment, so it can be removed.
-    if (!_data.empty()) {
-        _data.pop_back();
-    }
-
-    for (double d : reinterpret_cast<
-             const std::array<double, CubicMonoSpline::dataSize()>&>(spline)) {
-        _data.push_back(d);
-    }
-
-    // Verify that segments are C1 continuous. TODO this can be removed.
-    if (size() > 1) {
-        opensim_assert(
-            isC1Continuous(at(size() - 2), at(size() - 1)),
-            "Segment node C1 continuity check failed after writing as raw "
-            "doubles");
-    }
-
-    // Verify expected number of elements in container.
-    constexpr size_t alignment = CubicMonoSpline::dataSize() - 1;
-    opensim_assert(
-        _data.size() % alignment == 1,
-        "Unexpected storage length of SmoothSegmentedCubicMonoSplineData");
-}
-
-size_t SmoothSegmentedCubicMonoSplineData::size() const
-{
-    return _data.size() / (CubicMonoSpline::dataSize() - 1);
-}
-
-const CubicMonoSpline& SmoothSegmentedCubicMonoSplineData::at(
-    size_t index) const
-{
-    constexpr size_t alignment = CubicMonoSpline::dataSize() - 1;
-    return reinterpret_cast<const CubicMonoSpline&>(
-        _data.at(index * alignment));
-}
-
-SimTK::Vec2 SmoothSegmentedCubicMonoSplineData::getDomain() const
-{
-    return {_data.front(), _data.back()};
-}
-
-//==============================================================================
-//              QuadraticBezierCurve
-//==============================================================================
-
-QuadraticBezierCurve::QuadraticBezierCurve(
-    const CurveKnot& left,
-    const CurveKnot& right) :
-    _start(left),
-    _end(right)
-{
-    auto xySplines = calcQuadraticBezierSpline(left, right);
-    _x             = xySplines.first;
-    _y             = xySplines.second;
-}
-
-CurvePoint QuadraticBezierCurve::calcPoint(double u) const
-{
-    if (u == 0.) {
-        return {_x.calcValue(0.), _y.calcValue(0.)};
-    }
-    if (u == 1.) {
-        return {_x.calcValue(1.), _y.calcValue(1.)};
-    }
-    const double x0 = _x.calcValue(0.);
-    const double x1 = _x.calcValue(1.);
-    const double dx = (x1 - x0) * u;
-    const double x  = x0 + dx;
-    const double s  = _x.calcInverseValue(x);
-    const double y  = _y.calcValue(s);
-    return {x, y};
-}
-
-double QuadraticBezierCurve::calcValue(double x) const
-{
-    const double u = _x.calcInverseValue(x);
-    return _y.calcValue(u);
-}
-
-const CurveKnot& QuadraticBezierCurve::startKnot() const
-{
-    return _start;
-}
-
-const CurveKnot& QuadraticBezierCurve::endKnot() const
-{
-    return _end;
-}
-
-bool OpenSim::QuadraticBezierCurve::isAccurateWithinTol(
-    const OpenSim::CubicSpline& spline) const
-{
-    for (size_t i = 0; i < nAccuracySamples; ++i) {
-        const double u =
-            static_cast<double>(i) / static_cast<double>(nAccuracySamples);
-        const double x     = spline.x0 + (spline.x1 - spline.x0) * u;
-        const double y     = calcValue(x);
-        const double error = y - spline.calcValue(x);
-        const double maxError =
-            std::max(std::abs(relAccuracy * y), absAccuracy);
-        if (std::abs(error) > maxError) {
-            return false;
-        }
-    }
-    return true;
-}
-
-//==============================================================================
 //              Curve Shape
 //==============================================================================
 
-CurveShape::CurveShape(std::vector<MuscleCurveControlPoint> ctrlPts) :
-    CurveShape(calcKnotsFromControlPoints(ctrlPts))
-{}
-
-CurveShape::CurveShape(std::vector<CurveKnot> knots)
+std::vector<CurveKnot> C2ContinuousSegmentedCurve::calcMonotonicSegmentKnots()
+    const
 {
+    std::vector<double> knotXCoords = calcMonotonicSegmentXValues();
+    std::vector<CurveKnot> knots;
+    for (double x : knotXCoords) {
+        knots.push_back({x, calcValue(x), calcFirstDerivative(x)});
+    }
     for (size_t i = 0; i < knots.size() - 1;) {
         const CurveKnot& k0 = knots[i++];
         const CurveKnot& k1 = knots[i];
 
         opensim_assert(
             smoothMonotonicCurveExists(k0, k1),
-            "Failed to create curve shape: Knots not monotonic");
-        _segments.push_back(QuadraticBezierCurve(k0, k1));
+            "Failed to create curve curve: Knots not monotonic");
     }
+    return knots;
 }
 
 //==============================================================================
@@ -1059,41 +768,19 @@ CurveShape::CurveShape(std::vector<CurveKnot> knots)
 //==============================================================================
 
 SmoothSegmentedCubicMonoSpline::SmoothSegmentedCubicMonoSpline(
-    const CurveShape& shape,
-    size_t maxNumSegments) :
-    _splines(shape, maxNumSegments)
+    const C2ContinuousSegmentedCurve& curve,
+    size_t maxNumSegments,
+    double accuracy) :
+    _splines(calcSplineApproximationToCurve(curve, accuracy, maxNumSegments)),
+    _isInvertible(isInvertible(_splines))
 {
-    for (auto& s : shape.getSegments()) {
-        const auto pStart = s.calcPoint(0.);
-        opensim_assert(
-            isNumEq(calcValue(pStart.x), pStart.y),
-            "Failed to construct CubicMonoSpline: Start Knot points not "
-            "fitted.");
-        const auto pEnd = s.calcPoint(1.);
-        opensim_assert(
-            isNumEq(calcValue(pEnd.x), pEnd.y),
-            "Failed to construct CubicMonoSpline: End Knot points not fitted.");
-    }
     std::cout << "Constructed SmoothSegmentedCubicMonoSpline using "
               << _splines.size() << " segments\n";
 }
 
 SimTK::Vec2 SmoothSegmentedCubicMonoSpline::getDomain() const
 {
-    return _splines.getDomain();
-}
-
-const CubicMonoSpline& SmoothSegmentedCubicMonoSpline::findSegment(
-    double x) const
-{
-    // TODO use algo
-    size_t s = _splines.size();
-    for (size_t idx = 0; idx < s; ++idx) {
-        if (_splines.at(idx).x1 >= x) {
-            return _splines.at(idx);
-        }
-    }
-    return _splines.at(s - 1);
+    return {_splines.front().x0, _splines.back().x1};
 }
 
 double SmoothSegmentedCubicMonoSpline::calcValue(double x) const
@@ -1101,83 +788,61 @@ double SmoothSegmentedCubicMonoSpline::calcValue(double x) const
     return findSegment(x).calcValue(x);
 }
 
+ValueAndDerivative SmoothSegmentedCubicMonoSpline::calcValueAndDerivative(double x) const
+{
+    return findSegment(x).calcValueAndDerivative(x);
+}
+
+double SmoothSegmentedCubicMonoSpline::calcInverseValue(double y) const
+{
+    opensim_assert(
+        _isInvertible,
+        "SmoothSegmentedCubicMonoSpline is not invertible");
+    return findInverseSegment(y).calcInverseValue(y);
+}
+
+const CubicMonoSpline& SmoothSegmentedCubicMonoSpline::findInverseSegment(
+    double y) const
+{
+    Y0Coordinate searchY(y);
+    auto spline = std::lower_bound(
+        _splines.begin(),
+        _splines.end(),
+        searchY,
+        [](const Y0Coordinate& a, const Y0Coordinate& b) -> bool {
+            return a.y < b.y;
+        });
+    return spline == _splines.end() ? _splines.front() : *spline;
+}
+
+const CubicMonoSpline& SmoothSegmentedCubicMonoSpline::findSegment(
+    double x) const
+{
+    X0Coordinate searchX(x);
+    auto spline = std::lower_bound(
+        _splines.begin(),
+        _splines.end(),
+        searchX,
+        [](const X0Coordinate& a, const X0Coordinate& b) -> bool {
+            return a.x < b.x;
+        });
+    return spline == _splines.end() ? _splines.front() : *spline;
+}
+
+double SmoothSegmentedCubicMonoSpline::solve(
+    const std::function<ValueAndDerivative(double x)>& rhs,
+    double xEstimate,
+    size_t maxIter,
+    double eps) const
+{
+    return solveDiffentiableScalarEquation(
+        [&](double x) -> ValueAndDerivative {
+            return calcValueAndDerivative(x);
+        },
+        rhs,
+        xEstimate,
+        maxIter,
+        eps);
+}
+
 } // namespace OpenSim
-
-//==============================================================================
-//                  OLD
-//==============================================================================
-
-/* opensim_assert(sign * dydx0 >= 0. && "Monotonicity check failed"); */
-
-/* CubicSpline::CubicSpline() = default; */
-
-/* CubicSpline::CubicSpline( */
-/*     const CubicSpline&) = default; */
-
-/* CubicSpline& CubicSpline::operator=( */
-/*     const CubicSpline&) = default; */
-
-/* CubicSpline::~CubicSpline() noexcept = */
-/*     default; */
-
-/* CubicSpline::CubicSpline( */
-/*     CubicSpline&&) noexcept = default; */
-
-/* CubicSpline& CubicSpline::operator=( */
-/*     CubicSpline&&) noexcept = default; */
-
-/* namespace */
-/* { */
-/* bool splineConverger( */
-/*     const OpenSim::CurveControlPoint& pStart, */
-/*     const OpenSim::CurveControlPoint& pEnd, */
-/*     std::vector<OpenSim::CurveControlPoint>& points, */
-/*     double eps     = 1e-13, */
-/*     size_t maxIter = 100) */
-/* { */
-/*     // Initialize x coordinates. */
-/*     const double dx = pEnd.x - pEnd.x; */
-/*     for (size_t i = 0; i < points.size(); ++i) { */
-/*         points[i].x = pStart.x + dx * (static_cast<double>(points.size()) +
- * 1) / */
-/*                                      (static_cast<double>(points.size()) -
- * 1); */
-/*     } */
-/*     // Initialize y coordinates. */
-/*     const double dy = pEnd.y - pEnd.y; */
-/*     for (OpenSim::CurveControlPoint& p : points) { */
-/*         p.y    = pStart.y + dy / dx * (p.x - pStart.x); */
-/*         p.dydx = dy / dx; */
-/*     } */
-
-/*     // Iteratively find control points. */
-/*     for (size_t n = 0; n < maxIter; ++n) { */
-/*         double err = 0.; */
-/*         for (size_t i = 0; i < maxIter; ++i) { */
-/*             const OpenSim::CurveControlPoint pLeft = */
-/*                 i == 0 ? pStart : points.at(i - 1); */
-/*             const OpenSim::CurveControlPoint pRight = */
-/*                 i == points.size() - 1 ? pEnd : points.at(i + 1); */
-/*             OpenSim::CurveControlPoint pMid = points.at(i); */
-
-/*             const double leftSecantLine = */
-/*                 (pMid.y - pLeft.y) / (pMid.x - pLeft.x); */
-/*             const double rightSecantLine = */
-/*                 (pRight.y - pMid.y) / (pRight.x - pMid.x); */
-
-/*             pMid.dydx = 2. * leftSecantLine * rightSecantLine / */
-/*                         (leftSecantLine + rightSecantLine); */
-
-/*             const double yMidNew = */
-/*                 pLeft.y + (pLeft.dydx + pMid.dydx) / 2. * (pMid.x - pLeft.x);
- */
-/*             err    = std::max(std::abs(yMidNew - pMid.y), err); */
-/*             pMid.y = yMidNew; */
-/*         } */
-/*         if (err < eps) { */
-/*             return true; */
-/*         } */
-/*     } */
-/*     return false; */
-/* } */
-/* } // namespace */
