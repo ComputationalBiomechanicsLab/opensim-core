@@ -92,8 +92,8 @@ public:
     // For checking if additional knots should be created.
     bool isCurvy() const;
 
-    static constexpr double MIN_CURVINESS=0.1;
-    static constexpr double MAX_CURVINESS=0.9;
+    static constexpr double MIN_CURVINESS = 0.1;
+    static constexpr double MAX_CURVINESS = 0.9;
 
     // TODO weird: last curviness of last point is invalid.
     double curviness = SimTK::NaN;
@@ -211,33 +211,44 @@ private:
 //==============================================================================
 //              Curve Shape
 //==============================================================================
-// If the user gives just a few control points of the curve, it is
-// anyones guess what the general shape of the curve is.
-// The CurveShape is constructed from a few curve knots, and can generate a
-// curve point at any x between the knots.
-//
-// Input knots must be monotonic.
-class CurveShape final
+
+class SmoothSegmentedCubicMonoSpline;
+
+class CurveShape
 {
 public:
-    explicit CurveShape(std::vector<MuscleCurveControlPoint> ctrlPts);
+    //==========================================================================
+    //              Curve Shape Requirements
+    //==========================================================================
+    virtual double calcValue(double x) const                        = 0;
+    virtual double calcFirstDerivative(double x) const                   = 0;
+    virtual std::vector<double> calcMonotonicSegmentXValues() const = 0;
 
-    explicit CurveShape(std::vector<CurveKnot> knots);
+    virtual double calcDomainMax() const;
+    virtual double calcDomainMin() const;
 
-    const std::vector<QuadraticBezierCurve>& getSegments() const
+    //==========================================================================
+    //              Curve Shape Derived
+    //==========================================================================
+
+    std::vector<OpenSim::CurveKnot> calcMonotonicSegmentKnots() const;
+    CurveKnot calcKnot(double x) const;
+
+    enum class Continuity
     {
-        return _segments;
-    }
+        C1,
+        C2
+    };
 
-private:
-    std::vector<QuadraticBezierCurve> _segments;
+    SmoothSegmentedCubicMonoSpline calcSmoothCubicSplineInterpolant(
+        Continuity smoothness,
+        double accuracy,
+        size_t maxNumSegments) const;
 };
 
 //==============================================================================
 //                  SPLINE STORAGE
 //==============================================================================
-
-class SmoothSegmentedCubicMonoSpline;
 
 // C2 continuous segmented cubic monotonic spline storage.
 class SmoothSegmentedCubicMonoSplineData
