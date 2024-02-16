@@ -141,7 +141,7 @@ class SmoothSegmentedCubicMonoSpline
 public:
     explicit SmoothSegmentedCubicMonoSpline(
         const C2ContinuousSegmentedCurve& curve,
-        size_t maxNumSegments = 100,
+        size_t maxNumSegments = 50,
         double accuracy       = 1e-3);
 
     SimTK::Vec2 getDomain() const;
