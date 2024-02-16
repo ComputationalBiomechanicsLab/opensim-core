@@ -108,6 +108,7 @@ void writeDataToCSV(
 
 int main()
 {
+    if (true)
     {
         OpenSim::SmoothSegmentedFunction* f = OpenSim::
             SmoothSegmentedFunctionFactory::createTendonForceLengthCurve(
@@ -123,8 +124,8 @@ OpenSim::SmoothSegmentedFunctionFactory::
 "tendoncurve");
         writeDataToCSV(*f);
     }
-    return 0;
 
+    if (true)
     {
         OpenSim::SmoothSegmentedFunction* f = OpenSim::
             SmoothSegmentedFunctionFactory::createFiberForceVelocityCurve(
@@ -142,6 +143,7 @@ OpenSim::SmoothSegmentedFunctionFactory::
         writeDataToCSV(*f);
     }
 
+    if (false)
     {
         OpenSim::SmoothSegmentedFunction* f = OpenSim::
             SmoothSegmentedFunctionFactory::createFiberActiveForceLengthCurve(
@@ -157,6 +159,7 @@ OpenSim::SmoothSegmentedFunctionFactory::
         writeDataToCSV(*f);
     }
 
+    if (true)
     {
         OpenSim::SmoothSegmentedFunction* f = OpenSim::
             SmoothSegmentedFunctionFactory::createFiberForceLengthCurve(
