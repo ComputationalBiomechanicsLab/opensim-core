@@ -424,8 +424,151 @@ double calcMaxAbsDifference(
 //                      NATURAL SPLINE
 //==============================================================================
 
-// Overwrites the derivative values at the knots.
 std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
+    const OpenSim::C2ContinuousSegmentedCurve& curve,
+    std::vector<OpenSim::CurveKnot>& knots)
+{
+    opensim_assert(
+        knots.size() >= 2,
+        "need more than two knots to fit a spline");
+
+    // n = number of segments.
+    const size_t n = knots.size() - 1;
+    std::cout << "n = " << n << std::endl;
+    // Setup tridiagonal matrix:
+    // [d0, a0, 0, ..., 0] = [c0]
+    // [b0, d0, a1, ..., 0] = [c1]
+    std::vector<double> a;
+    std::vector<double> b;
+    std::vector<double> c;
+    std::vector<double> d;
+    a.reserve(n);
+    b.reserve(n);
+    c.reserve(n+1);
+    d.reserve(n+1);
+
+    // Start derivative constraint:
+    // dydx = -dx/3 a_k - dx/6 a_{k+1} + dy / dx
+    std::cout << "compute init derivative constraint" << std::endl;
+    {
+        const double dx   = knots.at(1).x - knots.at(0).x;
+        const double dy   = knots.at(1).y - knots.at(0).y;
+        const double dydx = knots.at(0).dydx;
+        d.push_back(dx / 3.);
+        a.push_back(dx / 6.);
+        c.push_back(dy / dx - dydx);
+    }
+
+    // Mid point constraint:
+    std::cout << "compute midpoint constraint" << std::endl;
+    for (size_t i = 1; i + 1 < knots.size(); ++i) {
+        const double dxL  = knots.at(i).x - knots.at(i - 1).x;
+        const double dxR  = knots.at(i + 1).x - knots.at(i).x;
+        const double dxM  = knots.at(i + 1).x - knots.at(i - 1).x;
+        const double dyL  = knots.at(i).y - knots.at(i - 1).y;
+        const double dyR  = knots.at(i + 1).y - knots.at(i).y;
+        const double dydx = knots.at(i).dydx;
+        d.push_back(dxM / 3.);
+        a.push_back(dxR / 6.);
+        b.push_back(dxL / 6.);
+        c.push_back(dyR / dxR - dyL / dxL);
+    }
+
+    // End derivative constraint:
+    // dydx = dx/3 a_k + dx/6 a_{k-1} + dy / dx
+    std::cout << "compute end derivative constraint" << std::endl;
+    {
+        const double dx   = knots.at(n).x - knots.at(n - 1).x;
+        const double dy   = knots.at(n).y - knots.at(n - 1).y;
+        const double dydx = knots.at(n).dydx;
+        d.push_back(-dx / 3.);
+        b.push_back(-dx / 6.);
+        c.push_back(dy / dx - dydx);
+    }
+
+    std::cout << "n = " << n << "\n"
+              << "a = " << a.size() << "\n"
+              << "b = " << b.size() << "\n"
+              << "c = " << c.size() << "\n"
+              << "d = " << d.size() << "\n";
+
+    // Set b to zeros:
+    std::cout << "eliminate b" << std::endl;
+    for (size_t i = 0; i+1 < d.size(); ++i) {
+        d.at(i + 1) += -a.at(i) * b.at(i) / d.at(i);
+        c.at(i + 1) += -c.at(i) * b.at(i) / d.at(i);
+    }
+
+    // Set a to zeros:
+    std::cout << "eliminate a" << std::endl;
+    for (size_t i = d.size() - 1; i > 0; --i) {
+        c.at(i - 1) += -c.at(i) * a.at(i - 1) / d.at(i);
+    }
+
+    // Fill the derivative values at the knots.
+    std::cout << "populate derivatives" << std::endl;
+    for (size_t i = 0; i+1 < d.size(); ++i) {
+        const double dx   = knots.at(i+1).x - knots.at(i).x;
+        const double dy   = knots.at(i+1).y - knots.at(i).y;
+        const double accL = c.at(i) / d.at(i);
+        const double accR = c.at(i + 1) / d.at(i + 1);
+        const double dydx  = -dx / 3. * accL - dx / 6. * accR + dy / dx;
+        if (i == 0) {
+            opensim_assert(std::abs(dydx - knots.front().dydx) < 1e-13, "init derivative check failed");
+        } else {
+            knots.at(i).dydx  = dydx;
+        }
+    }
+
+    // Verification:
+    std::cout << "verify solution" << std::endl;
+    for (size_t i = 1; i+1 < d.size(); ++i) {
+        const double accL = c.at(i - 1) / d.at(i - 1);
+        const double accM = c.at(i) / d.at(i);
+        const double accR = c.at(i + 1) / d.at(i + 1);
+
+        const double dxL = knots.at(i).x - knots.at(i - 1).x;
+        const double dxR = knots.at(i + 1).x - knots.at(i).x;
+        const double dxM = knots.at(i + 1).x - knots.at(i - 1).x;
+        const double dyL = knots.at(i).y - knots.at(i - 1).y;
+        const double dyR = knots.at(i + 1).y - knots.at(i).y;
+
+        const double error = dxL / 6. * accL + dxM / 3. * accM +
+                             dxR / 6. * accR - dyR / dxR + dyL / dxL;
+        std::cout << "error = " << error << std::endl;
+        opensim_assert(std::abs(error) < 1e-13, "failed natural spline");
+    }
+
+    // dydx = dx/3 a_k + dx/6 a_{k-1} + dy / dx
+    /* std::cout << "compute end derivative constraint" << std::endl; */
+    /* { */
+    /*     const double dx   = knots.at(n).x - knots.at(n - 1).x; */
+    /*     const double dy   = knots.at(n).y - knots.at(n - 1).y; */
+    /*     const double dydx = knots.at(n).dydx; */
+    /*     d.push_back(-dx / 3.); */
+    /*     b.push_back(-dx / 6.); */
+    /*     c.push_back(dy / dx - dydx); */
+    std::cout << "verify solution last segment" << std::endl;
+    {
+        const double dx   = knots.at(n).x - knots.at(n - 1).x;
+        const double dy   = knots.at(n).y - knots.at(n - 1).y;
+        const double dydx = knots.at(n).dydx;
+        const double accM = c.at(n-1) / d.at(n-1);
+        const double accR = c.at(n) / d.at(n);
+        const double error = accM * dx / 6. + accR * dx / 3. + dy/dx - dydx;
+        std::cout << "error = " << error << std::endl;
+        std::cout << "dydx = " << dydx << std::endl;
+        std::cout << "dy/dx = " << dy/dx << std::endl;
+        std::cout << "accM = " << accM * dx << std::endl;
+        std::cout << "accR = " << accR*dx << std::endl;
+        opensim_assert(std::abs(error) < 1e-13, "failed natural spline end cond");
+    }
+    /* opensim_assert(false, "break natural spline"); */
+    return knots;
+}
+
+// Overwrites the derivative values at the knots.
+std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivativesOld(
     const OpenSim::C2ContinuousSegmentedCurve& curve,
     std::vector<OpenSim::CurveKnot>& knots)
 {
@@ -606,7 +749,12 @@ std::vector<OpenSim::CubicMonoSpline> calcSplineApproximationToCurve(
     // Iteratively compute the natural spline, and refine the grid if needed.
     std::cout << "start algorithm" << std::endl;
     // TODO add natual spline fitting
-    while (updateGrid(splineKnots, curve, maxFitError, maxNumSegments)) {
+    /* while (updateGrid(splineKnots, curve, maxFitError, maxNumSegments)) { */
+    while (updateGrid(
+        calcNaturalCubicSplineKnotDerivatives(curve, splineKnots),
+        curve,
+        maxFitError,
+        maxNumSegments)) {
     }
 
     // Compute the Hermite interpolant connecting the knots.
@@ -619,8 +767,8 @@ std::vector<OpenSim::CubicMonoSpline> calcSplineApproximationToCurve(
 
     // Verify that final spline segments are continuous.
     opensim_assert(
-        isC1Continuous(splineKnots.front(), splines, splineKnots.back()),
-        "C1 continuity check of spline segments failed");
+        isC2Continuous(splineKnots.front(), splines, splineKnots.back()),
+        "C2 continuity check of spline segments failed");
 
     std::cout << "WARNING: Skipping C2 continuity check!" << std::endl;
     return splines;
