@@ -436,8 +436,10 @@ std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
     const size_t n = knots.size() - 1;
     std::cout << "n = " << n << std::endl;
     // Setup tridiagonal matrix:
-    // [d0, a0, 0, ..., 0] = [c0]
-    // [b0, d0, a1, ..., 0] = [c1]
+    // [d0, a0, 0,        .., 0] = [c0]
+    // [b0, d1, a1, 0,    .., 0] = [c1]
+    // [0, b1, d2, a2, 0, .., 0] = [c2]
+    // [         ..            ] = [..]
     std::vector<double> a;
     std::vector<double> b;
     std::vector<double> c;
@@ -447,13 +449,23 @@ std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
     c.reserve(n+1);
     d.reserve(n+1);
 
+    auto X = [&](size_t k) -> double {
+        return knots.at(k).x;
+    };
+    auto Y = [&](size_t k) -> double {
+        return knots.at(k).y;
+    };
+    auto DyDx = [&](size_t k) -> double {
+        return knots.at(k).dydx;
+    };
+
     // Start derivative constraint:
     // dydx = -dx/3 a_k - dx/6 a_{k+1} + dy / dx
     std::cout << "compute init derivative constraint" << std::endl;
     {
-        const double dx   = knots.at(1).x - knots.at(0).x;
-        const double dy   = knots.at(1).y - knots.at(0).y;
-        const double dydx = knots.at(0).dydx;
+        const double dx   = X(1) - X(0);
+        const double dy   = Y(1) - Y(0);
+        const double dydx = DyDx(0);
         d.push_back(dx / 3.);
         a.push_back(dx / 6.);
         c.push_back(dy / dx - dydx);
@@ -462,12 +474,18 @@ std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
     // Mid point constraint:
     std::cout << "compute midpoint constraint" << std::endl;
     for (size_t i = 1; i + 1 < knots.size(); ++i) {
-        const double dxL  = knots.at(i).x - knots.at(i - 1).x;
-        const double dxR  = knots.at(i + 1).x - knots.at(i).x;
-        const double dxM  = knots.at(i + 1).x - knots.at(i - 1).x;
-        const double dyL  = knots.at(i).y - knots.at(i - 1).y;
-        const double dyR  = knots.at(i + 1).y - knots.at(i).y;
-        const double dydx = knots.at(i).dydx;
+        const double dxL  = X(i) - X(i - 1);
+        const double dxR  = X(i + 1) - X(i);
+        const double dxM  = X(i + 1) - X(i-1);
+        const double dyL  = Y(i) - Y(i-1);
+        const double dyR  = Y(i+1) - Y(i);
+        const double dydx = DyDx(i);
+        /* const double dxL  = knots.at(i).x - knots.at(i - 1).x; */
+        /* const double dxR  = knots.at(i + 1).x - knots.at(i).x; */
+        /* const double dxM  = knots.at(i + 1).x - knots.at(i - 1).x; */
+        /* const double dyL  = knots.at(i).y - knots.at(i - 1).y; */
+        /* const double dyR  = knots.at(i + 1).y - knots.at(i).y; */
+        /* const double dydx = knots.at(i).dydx; */
         d.push_back(dxM / 3.);
         a.push_back(dxR / 6.);
         b.push_back(dxL / 6.);
@@ -478,9 +496,9 @@ std::vector<OpenSim::CurveKnot>& calcNaturalCubicSplineKnotDerivatives(
     // dydx = dx/3 a_k + dx/6 a_{k-1} + dy / dx
     std::cout << "compute end derivative constraint" << std::endl;
     {
-        const double dx   = knots.at(n).x - knots.at(n - 1).x;
-        const double dy   = knots.at(n).y - knots.at(n - 1).y;
-        const double dydx = knots.at(n).dydx;
+        const double dx   = X(n) - X(n-1);
+        const double dy   = Y(n) - Y(n-1);
+        const double dydx = DyDx(n);
         d.push_back(-dx / 3.);
         b.push_back(-dx / 6.);
         c.push_back(dy / dx - dydx);
