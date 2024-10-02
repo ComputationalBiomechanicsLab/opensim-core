@@ -31,7 +31,7 @@
 using namespace OpenSim;
 using namespace std;
 
-static osimAnalysesInstantiator instantiator; 
+//static osimAnalysesInstantiator instantiator;
      
 //_____________________________________________________________________________
 /**

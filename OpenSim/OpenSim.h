@@ -42,5 +42,5 @@ public:
     }
 };
 
-static osimInstantiator instantiator;
+//static osimInstantiator instantiator;
 #endif // _opensim_h_
