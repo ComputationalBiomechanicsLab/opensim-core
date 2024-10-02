@@ -33,7 +33,7 @@
 using namespace std;
 using namespace OpenSim;
 
-static osimExampleComponentsInstantiator osimExampleComponentsInstantiator; 
+//static osimExampleComponentsInstantiator osimExampleComponentsInstantiator; 
 
 //_____________________________________________________________________________
 /**
