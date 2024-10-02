@@ -64,7 +64,7 @@
 
 using namespace OpenSim;
 
-static osimMocoInstantiator instantiator;
+// static osimMocoInstantiator instantiator;
 
 OSIMMOCO_API void RegisterTypes_osimMoco() {
     try {

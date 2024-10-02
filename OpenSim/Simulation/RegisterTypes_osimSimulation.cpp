@@ -146,7 +146,7 @@
 using namespace std;
 using namespace OpenSim;
 
-static osimSimulationInstantiator instantiator; 
+//static osimSimulationInstantiator instantiator;
 
 //_____________________________________________________________________________
 /**
