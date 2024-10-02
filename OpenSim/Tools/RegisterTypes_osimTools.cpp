@@ -62,7 +62,7 @@
 using namespace std;
 using namespace OpenSim;
 
-static osimToolsInstantiator instantiator;
+//static osimToolsInstantiator instantiator;
 
 //_____________________________________________________________________________
 /**
