@@ -23,6 +23,8 @@ v4.6
   components. The `ForceProducer` API was also rolled out to a variety of existing `Force` components, which
   means that API users can now now ask many `Force` components what forces they produce (see #3891 for a
   comprehensive overview).
+- Fixed an issue where a copy of an `OpenSim::Model` containing a `OpenSim::ExternalLoads` could not be
+  finalized (#3926)
 
 v4.5.1
 ======
