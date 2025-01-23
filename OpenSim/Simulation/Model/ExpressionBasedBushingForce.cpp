@@ -24,9 +24,11 @@
 //=============================================================================
 // INCLUDES
 //=============================================================================
-#include <Lepton.h>
 
+#include <Lepton.h>
 #include "ExpressionBasedBushingForce.h"
+
+#include <OpenSim/Common/ModelDisplayHints.h>
 
 using namespace std;
 using namespace SimTK;
@@ -386,52 +388,32 @@ void ExpressionBasedBushingForce::generateDecorations
     {
         // invoke parent class method
         Super::generateDecorations(fixed, hints ,s, geometryArray); 
-        // draw frame1 as red
-        SimTK::Vec3 frame1color(1.0,0.0,0.0);
-        // draw frame2 as blue
-        SimTK::Vec3 frame2color(0.0,0.5,1.0);
-        // the moment on frame2 will be yellow
-        SimTK::Vec3 moment2color(1.0,1.0,0.0);
-        // the force on frame2 will be green
-        SimTK::Vec3 force2color(0.0,1.0,0.0);
 
-        // create decorative frames to be fixed on frame1 and frame2
-        SimTK::DecorativeFrame decorativeFrame1(0.2);
-        SimTK::DecorativeFrame decorativeFrame2(0.2);
+        if (fixed) {
+            return;  // the remainder of this function only emits dynamic decorations
+        }
 
-        // get connected frames
-        const PhysicalFrame& frame1 = getFrame1();
-        const PhysicalFrame& frame2 = getFrame2();
+        if (s.getSystemStage() < Stage::Dynamics) {
+            return;  // bushing force visualization requires the state is realized to `Dynamics`
+        }
 
-        // attach decorativeFrame1 onto frame1 of the bushing
-        decorativeFrame1.setBodyId(frame1.getMobilizedBodyIndex());
-        decorativeFrame1.setTransform(frame1.findTransformInBaseFrame());
-        decorativeFrame1.setColor(frame1color);
+        if (get_visual_aspect_ratio() == 0.0) {
+            return;  // model has explicitly zeroed the aspect ratio: the modeller's probably trying to hide the geometry
+        }
 
-        // attach decorativeFrame2 onto frame2 of the bushing
-        decorativeFrame2.setBodyId(frame2.getMobilizedBodyIndex());
-        decorativeFrame2.setTransform(frame2.findTransformInBaseFrame());
-        decorativeFrame2.setColor(frame2color);
+        SpatialVec F_GM(Vec3(0.0), Vec3(0.0));
+        SpatialVec F_GF(Vec3(0.0), Vec3(0.0));
 
-        geometryArray.push_back(decorativeFrame1);
-        geometryArray.push_back(decorativeFrame2);
+        // total bushing force in the internal basis of the deflection (dq)
+        Vec6 f = calcBushingForce(s);
+        convertInternalForceToForcesOnFrames(s, f, F_GF, F_GM);
 
-        // if the model is moving and the state is adequately realized,
-        // calculate and draw the bushing forces.
-        if(!fixed && (s.getSystemStage() >= Stage::Dynamics)){
-            SpatialVec F_GM(Vec3(0.0), Vec3(0.0));
-            SpatialVec F_GF(Vec3(0.0), Vec3(0.0));
+        // location of the bushing on frame2
+        SimTK::Vec3 p_GM_G = getFrame2().getTransformInGround(s).p();
 
-            // total bushing force in the internal basis of the deflection (dq) 
-            Vec6 f = calcBushingForce(s);
-
-            convertInternalForceToForcesOnFrames(s, f, F_GF, F_GM);
-
-            // location of the bushing on frame2
-            //SimTK::Vec3 p_b2M_b2 = frame2.findTransformInBaseFrame().p();
-            SimTK::Vec3 p_GM_G = frame2.getTransformInGround(s).p();
-            
-            // Add moment on frame2 as line vector starting at bushing location
+        if (get_moment_visual_scale() != 0.0 && F_GM[0].normSqr() > 0.0) {
+            // Add moment on frame2 as yellow line vector starting at bushing location
+            SimTK::Vec3 moment2color(1.0,1.0,0.0);
             SimTK::Vec3 scaled_M_GM(get_moment_visual_scale()*F_GM[0]);
             SimTK::Real m_length(scaled_M_GM.norm());
             SimTK::Real m_radius(m_length/get_visual_aspect_ratio()/2.0);
@@ -440,8 +422,11 @@ void ExpressionBasedBushingForce::generateDecorations
             frame2Moment.setTransform(X_m2cylinder);
             frame2Moment.setColor(moment2color);
             geometryArray.push_back(frame2Moment);
+        }
 
-            // Add force on frame2 as line vector starting at bushing location
+        if (get_force_visual_scale() != 0.0 && F_GM[1].normSqr() > 0.0) {
+            // Add force on frame2 as green line vector starting at bushing location
+            SimTK::Vec3 force2color(0.0,1.0,0.0);
             SimTK::Vec3 scaled_F_GM(get_force_visual_scale()*F_GM[1]);
             SimTK::Real f_length(scaled_F_GM.norm());
             SimTK::Real f_radius(f_length/get_visual_aspect_ratio()/2.0);
@@ -449,7 +434,6 @@ void ExpressionBasedBushingForce::generateDecorations
             SimTK::DecorativeCylinder frame2Force(f_radius, f_length/2.0);
             frame2Force.setTransform(X_f2cylinder);
             frame2Force.setColor(force2color);
-            
             geometryArray.push_back(frame2Force);
         }
     }
