@@ -23,6 +23,7 @@
  * limitations under the License.                                             *
  * -------------------------------------------------------------------------- */
 
+#include <simbody/internal/CableSpan.h>
 #include <OpenSim/Simulation/osimSimulationDLL.h>
 #include <OpenSim/Simulation/Model/ModelComponent.h>
 #include <OpenSim/Simulation/Model/Appearance.h>
@@ -224,6 +225,34 @@ private:
     // information. This field is mostly here for backwards-compatability with
     // the API.
     double _preScaleLength = 0.0;
+
+public:
+    struct Data {
+        struct AttachmentPoint {
+            std::string body;
+            SimTK::Vec3 station{SimTK::NaN};
+            SimTK::Vec3 point_G{SimTK::NaN};
+        };
+
+        struct Obstacle {
+            std::string body;
+            SimTK::Transform X_BS = SimTK::Transform().setToNaN();
+            SimTK::Vec3 contactPointHint_S{SimTK::NaN};
+            std::shared_ptr<SimTK::ContactGeometry> obstacleSurface;
+        };
+
+        struct Span {
+            std::vector<Obstacle> obstacles;
+            AttachmentPoint termination;
+        };
+
+        AttachmentPoint origin;
+        std::vector<Span> segments;
+    };
+
+    bool m_useCableSpan = false;
+    Data m_data;
+    std::vector<SimTK::CableSpan> m_cableSpans;
 };
 
 } // namespace OpenSim

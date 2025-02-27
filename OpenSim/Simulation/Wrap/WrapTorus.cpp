@@ -136,6 +136,11 @@ void WrapTorus::extendFinalizeFromProperties()
         getProperty_outer_radius().getName(),
         "Outer Radius cannot be equal or less than inner radius");
 
+    _contactGeometry = std::shared_ptr<SimTK::ContactGeometry>(
+            new SimTK::ContactGeometry::Torus(
+                get_outer_radius(),
+                get_inner_radius()));
+
 /*  Torus* torus = new Torus(_innerRadius, (_outerRadius-_innerRadius));
     setGeometryQuadrants(torus);
 */

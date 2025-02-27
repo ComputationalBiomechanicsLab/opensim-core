@@ -94,6 +94,7 @@
 #include "Control/InputController.h"
 #include "Control/SynergyController.h"
 
+#include "OpenSim/Simulation/Model/MyCable.h"
 #include "Wrap/PathWrap.h"
 #include "Wrap/PathWrapSet.h"
 #include "Wrap/WrapCylinder.h"
@@ -197,6 +198,10 @@ OSIMSIMULATION_API void RegisterTypes_osimSimulation()
     Object::registerType( FrameGeometry());
     Object::registerType( Arrow());
     Object::registerType( GeometryPath());
+    Object::registerType( MyCable());
+    Object::registerType( NodeSet());
+    Object::registerType( CableAttachmentPoint());
+    Object::registerType( CableObstacle());
     Object::registerType( FunctionBasedPath());
 
     Object::registerType( ControlSet() );

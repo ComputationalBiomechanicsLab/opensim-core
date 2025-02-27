@@ -107,6 +107,10 @@ void WrapEllipsoid::extendFinalizeFromProperties()
     ellipsoid->setEllipsoidParams(_dimensions[0], _dimensions[1], _dimensions[2]);
     setGeometryQuadrants(ellipsoid);
 */
+
+    _contactGeometry = std::shared_ptr<SimTK::ContactGeometry>(
+            new SimTK::ContactGeometry::Ellipsoid(
+                get_dimensions()));
 }
 
 void WrapEllipsoid::extendScale(const SimTK::State& s, const ScaleSet& scaleSet)

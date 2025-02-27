@@ -28,6 +28,8 @@
 #include "PathWrap.h"
 #include "WrapResult.h"
 #include "WrapMath.h"
+#include <memory>
+#include <simmath/internal/ContactGeometry.h>
 #include <OpenSim/Common/SimmMacros.h>
 #include <OpenSim/Common/ModelDisplayHints.h>
 #include <OpenSim/Common/ScaleSet.h>
@@ -103,6 +105,8 @@ void WrapSphere::extendFinalizeFromProperties()
         getProperty_radius().getName(),
         "Radius cannot be less than zero");
 
+    _contactGeometry = std::shared_ptr<SimTK::ContactGeometry>(
+            new SimTK::ContactGeometry::Sphere(get_radius()));
 /*
     Sphere* sphere = new Sphere(_radius);
     setGeometryQuadrants(sphere);

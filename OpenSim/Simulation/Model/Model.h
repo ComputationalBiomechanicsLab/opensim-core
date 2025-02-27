@@ -47,6 +47,7 @@
 
 #include "simbody/internal/Force_Gravity.h"
 #include "simbody/internal/GeneralContactSubsystem.h"
+#include <simbody/internal/CableSpan.h>
 
 
 namespace OpenSim {
@@ -522,6 +523,11 @@ public:
     GeneralForceSubsystem allocated by this %Model. **/
     SimTK::GeneralForceSubsystem& updForceSubsystem() 
     {   return *_forceSubsystem; }
+    SimTK::CableSubsystem& updCableSubsystem() 
+    {   return *_cableSubsystem; }
+    const SimTK::CableSubsystem& getCableSubsystem() const {
+        return *_cableSubsystem;
+    }
     /** (Advanced) Get read only access to internal Simbody RigidBodyForces at Dynamics stage **/
     const SimTK::Vector_<SimTK::SpatialVec>& getRigidBodyForces(const SimTK::State& state)
     {
@@ -1291,6 +1297,8 @@ private:
         _forceSubsystem;
     SimTK::ResetOnCopy<std::unique_ptr<SimTK::GeneralContactSubsystem>>
         _contactSubsystem;
+    SimTK::ResetOnCopy<std::unique_ptr<SimTK::CableSubsystem>>
+        _cableSubsystem;
 
     // We place this after the subsystems so that during copy construction and
     // copy assignment, the subsystem handles are copied first. If the system

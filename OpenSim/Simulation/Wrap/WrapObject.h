@@ -24,6 +24,7 @@
  * -------------------------------------------------------------------------- */
 
 // INCLUDE
+#include <simmath/internal/ContactGeometry.h>
 #include <OpenSim/Simulation/Model/ModelComponent.h>
 #include <OpenSim/Simulation/Model/Appearance.h>
 namespace OpenSim {
@@ -131,6 +132,11 @@ public:
                          const PathWrap& aPathWrap,
                          WrapResult& aWrapResult) const;
 
+    virtual std::shared_ptr<const SimTK::ContactGeometry> getContactGeometry() const
+    {
+        return _contactGeometry;
+    }
+
 protected:
     virtual int wrapLine(const SimTK::State& state,
                          SimTK::Vec3& aPoint1, SimTK::Vec3& aPoint2,
@@ -162,6 +168,8 @@ protected:
     int _wrapSign{ 1 };
 
     SimTK::Transform _pose;
+
+    std::shared_ptr<SimTK::ContactGeometry> _contactGeometry;
 //=============================================================================
 };  // END of class WrapObject
 //=============================================================================

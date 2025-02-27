@@ -131,6 +131,10 @@ void WrapCylinder::extendFinalizeFromProperties()
         InvalidPropertyValue,
         getProperty_length().getName(),
         "Length cannot be less than zero");
+
+    _contactGeometry = std::shared_ptr<SimTK::ContactGeometry>(
+            new SimTK::ContactGeometry::Cylinder(
+                get_radius()));
 }
 
 //_____________________________________________________________________________
